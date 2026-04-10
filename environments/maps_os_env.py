@@ -1,6 +1,6 @@
 # maps · cassette.help · MIT
 """
-maps_os_env.py — Atropos RL environment for maps-os.
+maps_os_env.py — Atropos RL environment for mapsOS.
 
 Trains Hermes to operate as a qualitative life OS:
 - STATE tags (not 1-10 mood scores)
@@ -198,7 +198,7 @@ def compute_maps_os_reward(
     scenario: MapsOSScenario,
 ) -> Dict[str, float]:
     """
-    Reward function for maps-os agent.
+    Reward function for mapsOS agent.
 
     Components:
         state_logged        (25%) — Did it log/reference a valid STATE tag?
@@ -287,7 +287,7 @@ def compute_maps_os_reward(
 # ---------------------------------------------------------------------------
 
 class MapsOSEnv(HermesAgentBaseEnv):
-    """Atropos RL environment for maps-os."""
+    """Atropos RL environment for mapsOS."""
 
     def __init__(self, config: Optional[Dict[str, Any]] = None):
         self.config = config or {}

@@ -157,7 +157,7 @@ class TestLocalStore:
         db = _tmp_db()
         payload = (
             '{"ok": true, "data": ['
-            '{"text": "maps-os WALKTHROUGH.md human usage guide"}, '
+            '{"text": "mapsOS walkthrough reference text"}, '
             '{"text": "STATE: 2026-04-09 | clear | actual entry"}'
             '], "error": "", "elapsed": 0.12}'
         )

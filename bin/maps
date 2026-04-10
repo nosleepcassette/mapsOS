@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 # maps · cassette.help · MIT
 """
-maps — standalone CLI for maps-os life operating system.
+maps — standalone CLI for mapsOS life operating system.
 
-Human-facing and agent-facing. Garden-resilient: if garden is unavailable,
-entries are written to local SQLite store and synced when garden returns.
+Human-facing and agent-facing. Entries land in local SQLite by default, with
+optional deferred flushes when an external backend is available.
 
 Usage:
   maps vent "i'm exhausted and can't stop coding"
@@ -19,10 +19,10 @@ Usage:
   maps pattern         # run pattern weaver on recent data
   maps review          # cycle review (last 14 days)
   maps survival        # check/display survival mode
-  maps sync            # flush local store to garden when it's back
+  maps sync            # flush deferred local entries when available
   maps sync --status   # show how many entries are waiting
   maps tulpa           # multi-line stream capture (full tulpa protocol)
-  maps eval            # show cassette's maps-os performance trend
+  maps eval            # show cassette's mapsOS performance trend
   maps person maggie   # show person context + recent interactions
 """
 from __future__ import annotations
@@ -174,15 +174,15 @@ def _build_astrolog_profile(name: str) -> tuple[dict, str]:
 
 def _remember(content: str, graph: str, dry_run: bool = False) -> str:
     """
-    Write a single entry. Returns 'garden', 'local', or 'dry'.
+    Write a single entry. Returns backend destination or 'dry'.
     Prints destination hint only when falling back to local.
     """
     if dry_run:
-        print(f"  [dry] garden remember '{content}' --graph {graph}")
+        print(f"  [dry] {content}")
         return "dry"
     _, dest = resilient_remember(content, graph=graph)
     if dest == "local":
-        print("  (garden down — saved locally)", file=sys.stderr)
+        print("  (saved locally; remote backend unavailable)", file=sys.stderr)
     return dest
 
 
@@ -524,7 +524,7 @@ def _eidetic_log(text: str, source: str) -> None:
         _eidetic_path = Path.home() / ".hermes" / "skills" / "eidetic-persistence"
         _sys.path.insert(0, str(_eidetic_path))
         from eidetic_logger import log_event
-        log_event("user_input", text, metadata={"source": source, "system": "maps-os"})
+        log_event("user_input", text, metadata={"source": source, "system": "mapsOS"})
     except Exception:
         pass  # eidetic is optional — never block on its absence
 
@@ -1201,7 +1201,7 @@ def cmd_sync(args) -> int:
         else:
             print(f"local store: {n} entries pending sync")
             if not garden_available():
-                print("  garden is currently unavailable")
+                print("  remote backend is currently unavailable")
         return 0
 
     if n == 0:
@@ -1209,15 +1209,15 @@ def cmd_sync(args) -> int:
         return 0
 
     if not garden_available():
-        print(f"garden unavailable — {n} entries waiting")
-        print("  try again when garden is reachable")
+        print(f"remote backend unavailable — {n} entries waiting")
+        print("  try again when it is reachable")
         return 1
 
     result = sync_to_garden(graph=args.graph, dry_run=args.dry_run)
     if result.get("error"):
         print(f"sync failed: {result['error']}", file=sys.stderr)
         return 1
-    print(f"synced {result['synced']} → garden")
+    print(f"synced {result['synced']} deferred entries")
     if result["failed"]:
         print(f"  {result['failed']} failed — will retry next sync")
     return 0
@@ -1254,7 +1254,7 @@ def _track_present(entries: list, keyword: str) -> bool:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="maps",
-        description="maps-os — qualitative life operating system",
+        description="mapsOS — qualitative life operating system",
     )
     p.add_argument("--graph", default="cassette")
     p.add_argument("--date", default=None)
@@ -1299,12 +1299,12 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("review",   help="cycle review (14 days)")
     sub.add_parser("survival", help="check/display survival mode")
 
-    sy = sub.add_parser("sync", help="flush local store to garden")
+    sy = sub.add_parser("sync", help="flush deferred local entries")
     sy.add_argument("--status", action="store_true", help="show pending count only")
 
     sub.add_parser("tulpa",    help="multi-line stream capture (tulpa protocol)")
 
-    evl = sub.add_parser("eval", help="show cassette maps-os tracking summary")
+    evl = sub.add_parser("eval", help="show cassette mapsOS tracking summary")
     evl.add_argument("--days", type=int, default=30, help="number of days (default 30)")
 
     wi = sub.add_parser("wins", help="show recent wins grouped by week")

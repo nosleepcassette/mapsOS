@@ -1,6 +1,6 @@
 # maps · cassette.help · MIT
 """
-maps_os_config.py — Configuration loader for maps-os.
+maps_os_config.py — Configuration loader for mapsOS.
 
 Loads ~/.maps_os_config.yaml. Always degrades gracefully — missing file returns {}.
 """

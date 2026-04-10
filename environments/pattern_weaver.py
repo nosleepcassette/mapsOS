@@ -1,6 +1,6 @@
 # maps · cassette.help · MIT
 """
-pattern_weaver.py — Detects narrative arcs across maps-os log entries.
+pattern_weaver.py — Detects narrative arcs across mapsOS log entries.
 
 Input:  lists of recent STATE/BODY/MIND/SPIRIT/INTENTION entries (as dicts or Entry objects)
 Output: list of Arc objects (type, message, severity)

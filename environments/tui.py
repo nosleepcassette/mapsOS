@@ -1,6 +1,6 @@
 # maps · cassette.help · MIT
 """
-tui.py — Rich terminal UI for maps-os.
+tui.py — Rich terminal UI for mapsOS.
 
 Launches when `maps` is run with no arguments in a TTY.
 Matches the tsundoku/augury aesthetic: warm amber palette, vim keys, raw input.
@@ -336,7 +336,7 @@ def _load_context() -> dict:
 
 def _draw_banner():
     w = _term_width()
-    logo = LOGO_LINES if w >= 80 else ["maps-os"]
+    logo = LOGO_LINES if w >= 80 else ["mapsOS"]
     color = AMBER
 
     # Center the block as a whole — preserve internal whitespace, shift by constant offset.
@@ -500,7 +500,7 @@ def _draw_dashboard(ctx: dict):
     if ctx["pending"] > 0:
         rp("")
         _content(
-            f"[dim]⚡ {ctx['pending']} entries in local store  (garden may be down)  [/dim]"
+            f"[dim]⚡ {ctx['pending']} entries in local store  (remote sync pending)  [/dim]"
             f"[{AMBER_DIM}]\\[y] sync[/{AMBER_DIM}]"
         )
 
@@ -1011,7 +1011,7 @@ def _screen_help():
         ("\\[i]ntention", "log INTENTION: met / missed / partial"),
         ("\\[r]eview", "cycle review — last 14 days, what held / dropped"),
         ("\\[c]heck", "refresh patterns and arcs"),
-        ("\\[y]sync", "flush local store to garden (use when garden was down)"),
+        ("\\[y]sync", "flush deferred local entries when available"),
         ("\\[t]ulpa", "multi-line stream capture — dump until /done or blank line"),
         ("\\[T]rend", "show state trend chart"),
         ("\\[V]iz", "show viz dashboard"),
@@ -1048,7 +1048,7 @@ def _screen_sync(ctx: dict):
     if not garden_available():
         rp("")
         _content(
-            f"[{STATE_COLORS['depleted']}]garden unavailable — {n} entries waiting[/{STATE_COLORS['depleted']}]"
+            f"[{STATE_COLORS['depleted']}]remote backend unavailable — {n} entries waiting[/{STATE_COLORS['depleted']}]"
         )
         rp("")
         _pause(1.0)
@@ -1061,7 +1061,7 @@ def _screen_sync(ctx: dict):
     if result.get("error"):
         _content(f"[dim]error: {result['error']}[/dim]")
     else:
-        _content(f"[green]✓ synced {result['synced']}[/green]", end="")
+        _content(f"[green]✓ flushed {result['synced']}[/green]", end="")
         if result["failed"]:
             rp(f"  [dim]{result['failed']} failed[/dim]")
         else:
@@ -1212,7 +1212,7 @@ def _pause(seconds: float = 0):
 def run():
     """Main entry point for the TUI."""
     if not HAS_RICH:
-        print("maps-os TUI requires Rich: pip install rich")
+        print("mapsOS TUI requires Rich: pip install rich")
         sys.exit(1)
 
     if not sys.stdin.isatty():

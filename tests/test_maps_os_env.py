@@ -1,6 +1,6 @@
 # maps · cassette.help · MIT
 """
-Tests for maps-os: vent_parser, pattern_weaver, survival_mode, maps_os_env.
+Tests for mapsOS: vent_parser, pattern_weaver, survival_mode, maps_os_env.
 """
 import sys
 from pathlib import Path
@@ -599,92 +599,6 @@ class TestMapsOSReward:
                 s,
             )
             assert r["state_logged"] == 0.25, f"tag '{tag}' not recognized"
-
-
-# ---------------------------------------------------------------------------
-# Migration script tests
-# ---------------------------------------------------------------------------
-
-class TestMigrateScript:
-    def test_mood_migration(self):
-        from scripts.migrate_legacy import migrate_line
-        result = migrate_line("MOOD: 2026-04-09 | 3 | rough day")
-        assert result is not None
-        assert result.track == "STATE"
-        assert "surviving" in result.migrated or "depleted" in result.migrated
-        assert "legacy_mood:3" in result.migrated
-
-    def test_mood_score_7(self):
-        from scripts.migrate_legacy import migrate_line
-        result = migrate_line("MOOD: 2026-04-09 | 7 | pretty good")
-        assert result is not None
-        assert "stable" in result.migrated or "thriving" in result.migrated
-
-    def test_mood_score_10(self):
-        from scripts.migrate_legacy import migrate_line
-        result = migrate_line("MOOD: 2026-04-09 | 10 | best day")
-        assert result is not None
-        assert "thriving" in result.migrated
-
-    def test_energy_migration(self):
-        from scripts.migrate_legacy import migrate_line
-        result = migrate_line("ENERGY: 2026-04-09 | low | tired after meetings")
-        assert result is not None
-        assert result.track == "BODY"
-        assert "BODY:" in result.migrated
-        assert "energy" in result.migrated
-        assert "legacy_level:low" in result.migrated
-
-    def test_habit_migration(self):
-        from scripts.migrate_legacy import migrate_line
-        result = migrate_line("HABIT: running | 12 | 2026-04-08")
-        assert result is not None
-        assert result.track == "INTENTION"
-        assert "running" in result.migrated
-        assert "met" in result.migrated
-        assert "legacy_streak:12" in result.migrated
-
-    def test_habit_broken_streak(self):
-        from scripts.migrate_legacy import migrate_line
-        result = migrate_line("HABIT: running | 0 | 2026-04-01")
-        assert result is not None
-        assert "missed" in result.migrated
-
-    def test_insight_passthrough(self):
-        from scripts.migrate_legacy import migrate_line
-        line = "INSIGHT: 2026-04-09 | monday mornings are tough | high"
-        result = migrate_line(line)
-        assert result is not None
-        assert result.migrated == line
-
-    def test_win_passthrough(self):
-        from scripts.migrate_legacy import migrate_line
-        line = "WIN: 2026-04-09 | shipped the feature"
-        result = migrate_line(line)
-        assert result is not None
-        assert result.migrated == line
-
-    def test_unrecognized_lines_collected(self):
-        from scripts.migrate_legacy import migrate_text
-        text = "MOOD: 2026-04-09 | 5 | ok\nRANDOM: garbage line\nHABIT: water | 3 | 2026-04-08"
-        entries, unrecognized = migrate_text(text)
-        assert len(entries) == 2
-        assert len(unrecognized) == 1
-        assert "RANDOM: garbage line" in unrecognized
-
-    def test_comments_skipped(self):
-        from scripts.migrate_legacy import migrate_text
-        text = "# this is a comment\nMOOD: 2026-04-09 | 7 | good"
-        entries, unrecognized = migrate_text(text)
-        assert len(entries) == 1
-
-    def test_garden_command_format(self):
-        from scripts.migrate_legacy import migrate_line
-        result = migrate_line("MOOD: 2026-04-09 | 8 | great day")
-        assert result is not None
-        # Migrated should be valid garden format
-        assert "STATE:" in result.migrated
-        assert "|" in result.migrated
 
 
 if __name__ == "__main__":

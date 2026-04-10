@@ -3,6 +3,8 @@ __pycache__/
 *.pyo
 *.db
 *.json
+.pytest_cache/
+.ruff_cache/
 .env
 config.yaml
 .DS_Store

@@ -1,9 +1,9 @@
 # maps · cassette.help · MIT
 """
-vent_parser.py — Free-form text → structured maps-os log entries.
+vent_parser.py — Free-form text → structured mapsOS log entries.
 
 Input:  raw text string
-Output: list of Entry dicts ready for garden logging
+Output: list of Entry dicts ready for structured logging
 """
 
 from __future__ import annotations

@@ -1,8 +1,8 @@
-# maps-os — Agent Skill
+# mapsOS — Agent Skill
 
-A Hermes operator skill for the maps-os qualitative life OS. Install this into your agent's skills directory and point it at your mapsOS instance.
+A Hermes operator skill for the mapsOS qualitative life OS. Install this into your agent's skills directory and point it at your mapsOS instance.
 
-All logging goes through the `maps` CLI — entries write to local SQLite and sync to a knowledge graph if one is configured.
+All logging goes through the `maps` CLI and lands in the same local memory store used by the repo.
 
 ---
 
@@ -13,11 +13,11 @@ All logging goes through the `maps` CLI — entries write to local SQLite and sy
 3. **Survival first** — When the user is depleted or grieving, all other tracking is noise. Reduce to basics.
 4. **Pulse, not cron** — Check in on session start, after `vent`, and when patterns trigger. Not at 7am.
 5. **Arcs, not snapshots** — One bad day is noise. A pattern is signal. Weave before alerting.
-6. **Schema is signal extraction, not archival** — Entries compress lived experience into structured fields. Undertones, emotional complexity, and nuance are deliberately flattened. The raw voice lives in eidetic (if running) or session logs. maps-os is for pattern detection over time, not comprehensive capture. Don't imply the schema is the whole truth.
+6. **Schema is signal extraction, not archival** — Entries compress lived experience into structured fields. Undertones, emotional complexity, and nuance are deliberately flattened. The raw voice lives in eidetic (if running) or session logs. mapsOS is for pattern detection over time, not comprehensive capture. Don't imply the schema is the whole truth.
 
 ---
 
-## Memory Schema (Garden Format)
+## Memory Schema
 
 ### STATE
 Primary emotional/psychological reality. The axis everything else orbits.
@@ -282,7 +282,7 @@ Append-only — never update in place. Write a new entry with updated status. `m
 maps goal "the thing i'm working toward" --due 2026-05-24
 maps goal --done "that thing"
 maps goal --update "ongoing project"
-garden recall 'GOAL:' --graph <your-graph> --limit 30
+maps goal --list
 ```
 
 ---
@@ -724,7 +724,7 @@ No action required. Just the read.
 
 ## Planning Requests
 
-maps-os is the **state layer**. It tracks how the user *is*. It does not manage task execution or daily planning.
+mapsOS is the **state layer**. It tracks how the user *is*. It does not manage task execution or daily planning.
 
 When the user asks for a daily plan or task structure, use the **3 Things system**:
 - THE Thing — the one thing that must happen
@@ -761,7 +761,6 @@ maps flash "..."                            # sub-threshold capture
 maps check                                  # session start
 maps pattern                                # full arc output
 maps survival                               # survival mode status
-maps sync --status                          # pending entries count
 maps eval                                   # agent performance trend
 maps wins [--week] [--month]                # surface WIN entries
 maps connect <name> [--note text]           # log connection + PERSON entry

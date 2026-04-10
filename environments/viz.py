@@ -1,6 +1,6 @@
 # maps · cassette.help · MIT
 """
-viz.py — Visualization utilities for maps-os.
+viz.py — Visualization utilities for mapsOS.
 
 Rich-only rendering for state trends, body signals, and arc history.
 """
@@ -199,7 +199,7 @@ def render_viz(
     else:
         text.append("no arcs fired\n")
 
-    return Panel(text, title="maps-os viz")
+    return Panel(text, title="mapsOS viz")
 
 
 def render_trend_simple(entries: list, days: int = 90) -> str:

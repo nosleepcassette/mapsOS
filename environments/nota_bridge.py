@@ -1,15 +1,15 @@
 # maps · cassette.help · MIT
 """
-nota_bridge.py — Optional integration between maps-os and nota.
+nota_bridge.py — Optional integration between mapsOS and nota.
 
 This module is intentionally NOT a hard dependency.
 If nota is unavailable, all functions degrade gracefully.
 
 Two integration points:
-  1. Intention → harsh log: write maps-os INTENTIONS to harsh's log format
-     so nota habits and maps-os intentions stay loosely synchronized.
+  1. Intention → harsh log: write mapsOS INTENTIONS to harsh's log format
+     so nota habits and mapsOS intentions stay loosely synchronized.
   2. Vent → task extraction: scan vent text for action items and optionally
-     route them to nota braindump (action items) vs. maps-os (state signals).
+     route them to nota braindump (action items) vs. mapsOS (state signals).
 
 nota is NOT structurally required. This bridge activates only when:
   - nota is installed and on PATH, OR
@@ -42,7 +42,7 @@ def nota_available() -> bool:
 # Intention → harsh sync
 # ---------------------------------------------------------------------------
 
-# Maps maps-os intention status to harsh log symbols
+# Maps mapsOS intention status to harsh log symbols
 # harsh uses: . = done, o = skipped, - = partial
 _INTENTION_TO_HARSH = {
     "met": ".",
@@ -58,7 +58,7 @@ def sync_intention_to_harsh(
     dry_run: bool = False,
 ) -> bool:
     """
-    Write a maps-os intention to harsh's log without using streak UI.
+    Write a mapsOS intention to harsh's log without using streak UI.
 
     Args:
         name:     Intention name (must match a harsh habit name)
@@ -136,7 +136,7 @@ def extract_action_items(text: str) -> list[str]:
     """
     Find likely action items in vent text.
     Returns list of short action phrases.
-    These are candidates for nota braindump, not maps-os state logs.
+    These are candidates for nota braindump, not mapsOS state logs.
     """
     actions = []
     t_lower = text.lower()

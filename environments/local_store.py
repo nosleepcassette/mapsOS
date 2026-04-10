@@ -1,10 +1,10 @@
 # maps · cassette.help · MIT
 """
-local_store.py — Garden-independent local storage for maps-os.
+local_store.py — backend-resilient local storage for mapsOS.
 
-When garden is unavailable, entries are written here instead.
-Same format as garden entries — pipes-delimited strings.
-A sync command flushes pending entries to garden when it's back.
+When the remote backend is unavailable, entries are written here instead.
+Entries use the same pipes-delimited schema everywhere in the repo.
+A sync command flushes pending entries when that backend is back.
 
 Storage: ~/.maps_os_local.db (SQLite)
 """
@@ -302,7 +302,7 @@ def sync_to_garden(graph: str = "cassette", db_path: Path = DEFAULT_DB_PATH,
 
 def main():
     import argparse
-    p = argparse.ArgumentParser(description="Sync local maps-os store to garden")
+    p = argparse.ArgumentParser(description="Sync local mapsOS store")
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--graph", default="cassette")
     p.add_argument("--status", action="store_true", help="Show pending count only")
@@ -314,19 +314,19 @@ def main():
             print("local store: clean (nothing pending)")
         else:
             print(f"local store: {n} unsynced entries")
-            print("  run 'maps sync' when garden is available")
+            print("  run 'maps sync' when the remote backend is available")
         return
 
     if not garden_available():
         n = count_pending(graph=args.graph)
-        print(f"garden unavailable — {n} entries waiting in local store")
+        print(f"remote backend unavailable — {n} entries waiting in local store")
         return
 
     result = sync_to_garden(graph=args.graph, dry_run=args.dry_run)
     if result.get("error"):
         print(f"sync failed: {result['error']}")
     else:
-        print(f"synced {result['synced']} entries to garden")
+        print(f"synced {result['synced']} deferred entries")
         if result["failed"]:
             print(f"  {result['failed']} failed — will retry next sync")
 

@@ -1,6 +1,6 @@
 # maps · cassette.help · MIT
 """
-survival_mode.py — State machine for maps-os Survival Mode.
+survival_mode.py — State machine for mapsOS survival mode.
 
 Survival Mode activates when STATE = depleted or grieving for 2+ consecutive days.
 It contracts the system: only eat/sleep/water tracked, no productivity language.

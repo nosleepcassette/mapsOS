@@ -1,293 +1,88 @@
-# maps-os
+# mapsOS
 
-![maps-os](mapsOS.png)
+![mapsOS](mapsOS.png)
 
-Life tracking that works with how you actually think, not how productivity apps assume you do.
+`mapsOS` is a qualitative life-tracking CLI/TUI built around narrative state instead of scores, streaks, or rigid check-in schedules.
 
-Not a habit tracker. Not a mood journal. Not a productivity app.
+It is designed to capture what is actually happening, structure it just enough to be useful, and surface recurring arcs across recent sessions.
 
-maps-os tracks narrative states, surfaces patterns across days and weeks, and knows when to drop everything non-essential. Runs as a standalone CLI and TUI, logs to a knowledge graph with local SQLite fallback, and includes an Atropos-compatible RL training environment.
+## What mapsOS tracks
 
----
+- `STATE`: the dominant emotional or psychological reality for a session
+- `BODY`, `MIND`, `SPIRIT`: three tracks that can diverge sharply
+- `INTENTION`: honest tracking without shame loops
+- `WIN`, `PERSON`, `DECISION`, `RESISTANCE`, `TRIGGER`, `GOAL`, `EVENT`, `DEADLINE`, `FLASH`: longer-arc and context signals extracted from free-form text or logged directly
 
-## Why this exists
-
-Most life-tracking tools are built around numbers. Mood scores out of ten. Sleep quality percentages. Streak counters. Completion rates. The assumption is that if you measure enough dimensions precisely enough, patterns emerge and behavior changes.
-
-That assumption doesn't hold for a lot of people — and it especially doesn't hold when the thing you're trying to track is how you actually feel, not a proxy metric for it.
-
-maps-os started as a fork of a numeric wellness system and ended up as something almost philosophically opposite. Numeric mood scores became qualitative state tags. Nine siloed health dimensions collapsed into three tracks — BODY, MIND, SPIRIT — that can and do diverge wildly from each other. Fixed-schedule briefings (morning, midday, evening, weekly) got replaced with session-triggered logic that adapts to irregular sleep and work patterns. Streak tracking was removed entirely. The RL reward function explicitly penalizes productivity language when you're in a low state.
-
-The result is a system that meets you where you are. It doesn't ask you to score your mood. It asks you to say what's happening, and it listens.
-
----
-
-## What It Tracks
-
-### STATE
-The primary axis. One tag per session — the dominant emotional/psychological reality. No scores. No averages.
-
-| Tag | Meaning |
-|-----|---------|
-| `surviving` | minimal function, getting through |
-| `stable` | neutral baseline, nothing wrong, nothing lit |
-| `grounded` | anchored, present, not drifting — active quality distinct from `stable` |
-| `thriving` | genuine forward momentum, things clicking |
-| `tender` | emotionally soft, open, post-connection warmth — still, not momentum |
-| `grieving` | loss-adjacent (person, phase, possibility) |
-| `manic` | elevated, fast, possibly unsustainable |
-| `depleted` | tank empty, may still be functional |
-| `flooded` | emotionally overwhelmed, nervous system loud |
-| `clear` | post-storm clarity, unusual perceptual sharpness |
-
-### BODY / MIND / SPIRIT
-Three tracks that can diverge wildly from each other.
-
-- **BODY** — sleep, pain, hunger, movement, substances, energy
-- **MIND** — focus, clarity, overwhelm, flow
-- **SPIRIT** — connection, creativity, purpose, isolation
-
-### Extended Tracking
-Extracted automatically from vent text or logged via CLI:
-
-| Track | What it captures |
-|-------|-----------------|
-| `WIN` | Executive function wins — things done despite resistance |
-| `PERSON` | People in orbit — contact, context, sentiment |
-| `DECISION` | Unresolved choice points |
-| `RESISTANCE` | Internal friction — knowing what to do but not being able to start |
-| `TRIGGER` | Events that shifted state |
-| `GOAL` | Longer-arc intentions with status tracking |
-| `EVENT` | Upcoming calendar events, auto-extracted from vent |
-| `DEADLINE` | Time-sensitive obligations |
-| `FLASH` | Sub-threshold signals — no structure, just capture |
-
-### INTENTIONS
-Not habits. Not streaks. Just honest tracking of what was tried.
-`met` / `missed` / `partial` — no judgment in the schema.
-
----
-
-## CLI Reference
+## Core commands
 
 ```bash
-# core tracking
-maps vent "i'm exhausted but i can't sleep"   # full parser → auto-log
-maps flash "laundry"                                  # sub-threshold capture, no structure
-maps state thriving "post-tender clarity"          # direct state log
-maps body sleep none "up since 5am"               # direct body log
-maps mind flow high "6hr build session"           # direct mind log
+# free-form capture
+maps vent "i'm exhausted but i can't stop coding"
+maps tulpa
+maps flash "laundry"
+
+# direct logging
+maps state thriving "post-storm clarity"
+maps body sleep none "up since 5am"
+maps mind flow high "six hour build session"
 maps spirit connection rising "good call"
 maps intention water missed "forgot again"
-maps intention movement met "dog park 45min"
 
-# session + pattern
-maps check                    # session start: context pull + arc check
-maps pattern                  # full pattern weaver output
-maps review                   # cycle review (last 14 days)
-maps survival                 # check / display survival mode
+# review + patterning
+maps check
+maps pattern
+maps review
+maps survival
+maps trend --days 7
+maps viz
 
-# extended capture
-maps tulpa                    # multi-line stream capture
-                              # end with /done or Ctrl+D
+# people, goals, wins, events
+maps connect alex "good catch-up"
+maps person --list
+maps goal "sort housing" --due 2026-05-24
+maps goal --list
+maps wins --week
+maps events --week
 
-# wins + goals
-maps wins                     # recent wins, grouped by week
-maps wins --week              # this week only
-maps wins --month             # this month only
-maps goal "sort housing"      # log a new goal
-maps goal --due 2026-05-24 "housing"
-maps goal --list              # open goals
-maps goal --done <phrase>     # mark complete
-maps goal --update <phrase>   # mark in_progress
-
-# events + deadlines
-maps events                   # upcoming events
-maps events --week            # this week only
-
-# people
-maps person chungus           # profile + recent interactions + astrolog status
-maps person --list            # all known people + last contact
-maps person --init-astrolog   # create skeleton profiles for everyone without one
-
-# visualization
-maps trend                    # STATE trend (last 30 days)
-maps trend --days 7           # shorter window
-maps viz                      # body/state/arc dashboard
-
-# system
-maps eval                     # cassette performance trend (last 30 days)
+# evaluation
 maps eval --days 7
-maps connect <name>           # log connection + PERSON entry
-maps connect --status         # last contact per known person
-maps sync                     # flush local store to garden
-maps sync --status            # pending entry count
 ```
 
-Running `maps` with no arguments in a TTY launches the TUI.
+Running `maps` with no arguments in a TTY launches the Rich-based TUI.
 
----
+## Pattern system
 
-## TUI
+mapsOS includes a pattern weaver that runs after vents and at session start. It looks for multi-day arcs such as:
 
-```bash
-python3 bin/maps
-```
+- `manic_spike`
+- `body_neglect`
+- `isolation_creep`
+- `post_manic_drop`
+- `resistance_pattern`
+- `negative_interaction_pattern`
+- `exec_dysfunction`
+- `intrusive_loop`
 
-Requires `rich`. No Textual dependency — raw termios + Rich.
-
-Warm amber palette. STATE-specific colors. Dashboard, survival, vent, flash, state, body, mind, spirit, intention, review, help, and sync screens.
-
-| Key        | Action                            |
-|------------|-----------------------------------|
-| `v`        | vent                              |
-| `t`        | tulpa (multi-line stream capture) |
-| `f`        | flash                             |
-| `s`        | state                             |
-| `b`        | body                              |
-| `m`        | mind                              |
-| `S`        | spirit                            |
-| `i`        | intention                         |
-| `r`        | review                            |
-| `c`        | refresh / pattern check           |
-| `y`        | sync local store                  |
-| `T`        | trend chart                       |
-| `V`        | viz dashboard                     |
-| `?` / `h`  | help                              |
-| `q`        | quit                              |
-
----
-
-## Pattern Weaving — 25 Arcs
-
-After every vent and at session start, the pattern weaver runs across recent entries and surfaces arcs. Each arc has a suppression cooldown — arcs don't repeat every session while conditions persist.
-
-The arc set goes well beyond what most tracking tools attempt. Where a standard system might flag "mood dip for 3 consecutive days," maps-os detects things like `exec_dysfunction` (high resistance + stalled goal + dysregulated state), `resistance_pattern` (same friction source recurring over two weeks), `negative_interaction_pattern` (a specific person showing up negatively across a month), and `intrusive_loop` (the same topic appearing across multiple flash captures without resolution). These are patterns that show up in life but rarely in software.
-
-### Alert arcs (one at a time, highest priority)
-
-| Arc | Trigger | Cooldown |
-|-----|---------|---------|
-| `manic_spike` | Manic/depleted + no sleep + high flow | 1 day |
-| `body_neglect` | High flow + hunger ignored or no movement | 1 day |
-| `isolation_creep` | 3+ isolation logs or 5+ days no connection | 2 days |
-| `state_dip_holding` | 2+ low states in last 3 — triggers survival mode | never suppressed |
-
-### Insight arcs (all that apply)
-
-| Arc                          | Trigger                                                   | Cooldown |
-|------------------------------|-----------------------------------------------------------|----------|
-| `spirit_rising`              | Connection rising while state is low                      | 3 days   |
-| `post_manic_drop`            | Was manic, now depleted/stable                            | 2 days   |
-| `thriving_streak`            | 3 consecutive thriving                                    | 3 days   |
-| `productivity_spiral`        | Manic/depleted + work language + no spirit tracked        | 2 days   |
-| `catastrophizing_spike`      | Catastrophizing phrases in vent notes                     | 1 day    |
-| `planning_hyperfocus`        | Planning language + high mind + no intentions today       | 1 day    |
-| `substance_coping`           | Substances logged during heavy state                      | 3 days   |
-| `avoidance_language`         | 2+ avoidance phrases in recent vents                      | 2 days   |
-| `habit_candidate`            | Intention logged 5+ times at ≥60% met rate                | —        |
-| `decision_pile`              | 3+ unresolved DECISION entries in 7 days                  | 3 days   |
-| `trigger_pattern`            | 3+ TRIGGER entries from same source in 30 days            | 7 days   |
-| `goal_stall`                 | GOAL open >14 days                                        | 7 days   |
-| `resistance_pattern`         | 3+ RESISTANCE entries, same source, 14 days               | 5 days   |
-| `negative_interaction_pattern` | 3+ negative PERSON entries, same person, 30 days        | 7 days   |
-| `exec_dysfunction`           | High resistance + stalled goal + dysregulated STATE       | —        |
-| `intrusive_loop`             | Same topic in 3+ flash entries                            | —        |
-
-### Behavioral arcs (response calibration, not code)
-
-- `avoidance_loop` — same task mentioned 3+ times without resolution
-- `trust_rupture` — lied/betrayed in vent → suppress everything, just witness
-- `context_inheritance` — session start state comparison
-- `state_memory_loss` — nudge 48+ hours after logged state with no follow-up
-
----
-
-## Survival Mode
-
-Triggers when STATE has been `depleted` or `grieving` for 2+ of the last 3 entries.
-
-In survival mode:
-- Logging collapses to STATE + BODY only
-- All arcs suppressed except body neglect
-- Briefing is exactly three items: eat, sleep, water
-- No productivity language anywhere
-
-Exits when a non-low state is logged.
-
-This is one of the more meaningful design decisions in the system. When you're struggling, the last thing you need is more features. The system gets out of the way.
-
----
-
-## Arc Cooldown
-
-Arcs are suppressed after firing to prevent alert fatigue. A `manic_spike` that lasts three days won't fire three sessions in a row. Cooldowns persist to `~/.maps_os_cooldown.json`.
-
-Survival-severity arcs (`state_dip_holding`) are never suppressed.
-
----
-
-## Garden Failsafe
-
-If garden is unavailable, entries write to `~/.maps_os_local.db`. When garden comes back, `maps sync` flushes the queue. The system never loses data.
-
----
-
-## Person Context
-
-`~/.maps_os_config.yaml` maintains a `known_people` list for name extraction from vent text, plus a `people:` section with role/notes for each person.
-
-```bash
-maps person --list            # everyone + last contact
-maps person zendaya           # recent interactions, role, astrolog status
-maps person --init-astrolog   # scaffold ~/.hermes/astrolog/{name}_profile.json
-```
-
-Astrolog skeleton profiles at `~/.hermes/astrolog/` link relational context to birth chart data. Birth data filled in separately when known.
-
----
+Survival mode contracts the system when recent state has stayed low: logging narrows, prompts get shorter, and productivity language drops out.
 
 ## Installation
 
 ```bash
 git clone https://github.com/nosleepcassette/mapsOS
 cd mapsOS
-pip install rich
+pip install -r requirements.txt
 chmod +x bin/maps
 export PATH="$PATH:$(pwd)/bin"
 ```
 
-Add that `export` line to your `~/.zshrc` or `~/.bashrc` to make it permanent.
+Local entries are stored in `~/.maps_os_local.db`.
 
-**Dependencies:**
+**Requirements:**
 - Python 3.10+
-- `rich` (TUI only — CLI works without it)
-- [`garden`](https://github.com/nosleepcassette/garden) (knowledge graph — optional, local store is the fallback)
-- [`nota`](https://github.com/nosleepcassette/nota) (task routing — optional, detected automatically)
-- `eidetic` (verbatim logging — optional, detected automatically)
+- `rich` for the TUI
+- `pyyaml` for config loading
 
 **Agent integration:** [`SKILL.md`](https://gist.github.com/nosleepcassette/6644b13147a064c234a20b2642a4809e) — Hermes operator guide covering session protocol, vent parsing, arc response calibration, and tulpa capture mode.
-
----
-
-## RL Training
-
-`environments/maps_os_env.py` is an Atropos-compatible RL training environment. 13 scenarios across vent, session start, survival, cycle review, and intention log modes.
-
-Reward weights:
-
-| Component | Weight | What it measures |
-|-----------|--------|-----------------|
-| `state_logged` | 0.25 | Did the user log STATE? |
-| `correct_state` | 0.20 | Valid and contextually appropriate tag |
-| `track_coverage` | 0.20 | BODY/MIND/SPIRIT covered |
-| `tool_coverage` | 0.15 | Expected tools used |
-| `no_streak_language` | 0.10 | No pressure vocabulary |
-| `survival_correct` | 0.10 | Survival mode handled correctly |
-
-Passive evaluation: `~/.hermes/hooks/post_session_life_os.py` fires after sessions and logs to `~/.hermes/logs/.atropos-history.json`. View trends with `maps eval`.
-
----
 
 ## Tests
 
@@ -295,56 +90,37 @@ Passive evaluation: `~/.hermes/hooks/post_session_life_os.py` fires after sessio
 python3 -m pytest tests/ -v
 ```
 
-198 tests covering: vent parser, pattern weaver (ARCs 1–25), arc cooldown, survival mode, CLI commands, local store, RL environment.
+The public branch keeps the runnable code, the test suite, and the operator skill source while dropping legacy demo and internal planning material.
 
----
+## Project structure
 
-## Project Structure
-
-```
-hermes-maps-os/
+```text
+mapsOS/
 ├── bin/
-│   └── maps                    — CLI entry point (human + agent facing)
+│   └── maps
+├── docs/
+│   └── SKILL.md
 ├── environments/
-│   ├── vent_parser.py          — free-form text → structured entries
-│   ├── pattern_weaver.py       — arc detection (ARCs 1–25)
-│   ├── arc_cooldown.py         — per-arc suppression, ~/.maps_os_cooldown.json
-│   ├── survival_mode.py        — survival mode state machine
-│   ├── maps_os_env.py          — Atropos RL training environment
-│   ├── maps_os_config.py       — config loader, person_context(), person_birth_hint()
-│   ├── local_store.py          — SQLite garden failsafe
-│   ├── nota_bridge.py          — optional nota integration
-│   ├── viz.py                  — Rich visualizations: trend, body/arc dashboard
-│   ├── date_resolver.py        — relative date → ISO date
-│   └── tui.py                  — Rich TUI
-├── tests/
-│   ├── test_maps_os_env.py     — RL environment tests
-│   ├── test_new_arcs.py        — ARCs 9–25 tests
-│   ├── test_arc_cooldown.py    — arc suppression tests
-│   ├── test_cli_commands.py    — CLI command integration tests
-│   ├── test_phase26_fixes.py   — regression tests (Phase 2.6 bug fixes)
-│   ├── test_maps_os_config.py  — config loader + person_context tests
-│   └── test_local_store.py     — local SQLite store tests
-├── scripts/
-│   └── migrate_legacy.py       — legacy migrator
-└── docs/
-    ├── SETUP.md                — install + configuration guide
-    ├── AGENT_GUIDE.md          — guide for cassette and other agents
-    ├── MAPS_OS_FEATURE_SPEC.md — feature spec + roadmap
-    └── WALKTHROUGH.md          — human usage walkthrough
+│   ├── arc_cooldown.py
+│   ├── date_resolver.py
+│   ├── local_store.py
+│   ├── maps_os_config.py
+│   ├── maps_os_config.yaml
+│   ├── maps_os_env.py
+│   ├── nota_bridge.py
+│   ├── pattern_weaver.py
+│   ├── survival_mode.py
+│   ├── tui.py
+│   ├── vent_parser.py
+│   └── viz.py
+└── tests/
+    ├── test_arc_cooldown.py
+    ├── test_cli_commands.py
+    ├── test_local_store.py
+    ├── test_maps_os_config.py
+    ├── test_maps_os_env.py
+    ├── test_new_arcs.py
+    └── test_phase26_fixes.py
 ```
-
----
-
-## Migration
-
-```bash
-python3 scripts/migrate_legacy.py --dry-run   # preview
-python3 scripts/migrate_legacy.py             # migrate
-```
-
-Converts numeric mood scores → STATE tags, energy → BODY, habits → INTENTIONS. Original values preserved in `legacy_` fields.
-
----
 
 *maps · cassette.help · MIT*

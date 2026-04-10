@@ -1,5 +1,5 @@
 environment:
-  name: maps-os
+  name: mapsOS
   class: environments.maps_os_env.MapsOSEnv
 
 training:
@@ -21,5 +21,5 @@ reward_weights:
   survival_correct: 0.10
 
 logging:
-  wandb_project: hermes-maps-os
+  wandb_project: mapsOS
   log_every_n_steps: 10
