@@ -60,8 +60,8 @@ Not habits. Not streaks. Just honest tracking of what was tried.
 
 ```bash
 # core tracking
-maps vent "i'm exhausted and can't stop coding"   # full parser → auto-log
-maps flash "emma"                                  # sub-threshold capture, no structure
+maps vent "i'm exhausted but i can't sleep"   # full parser → auto-log
+maps flash "laundry"                                  # sub-threshold capture, no structure
 maps state thriving "post-tender clarity"          # direct state log
 maps body sleep none "up since 5am"               # direct body log
 maps mind flow high "6hr build session"           # direct mind log
@@ -94,7 +94,7 @@ maps events                   # upcoming events
 maps events --week            # this week only
 
 # people
-maps person maggie            # profile + recent interactions + astrolog status
+maps person chungus           # profile + recent interactions + astrolog status
 maps person --list            # all known people + last contact
 maps person --init-astrolog   # create skeleton profiles for everyone without one
 
@@ -126,20 +126,20 @@ Requires `rich`. No Textual dependency — raw termios + Rich.
 
 Warm amber palette. STATE-specific colors. Dashboard, survival, vent, flash, state, body, mind, spirit, intention, review, help, and sync screens.
 
-| Key | Action |
-|-----|--------|
-| `v` | vent |
-| `f` | flash |
-| `s` | state |
-| `b` | body |
-| `m` | mind |
-| `S` | spirit |
-| `i` | intention |
-| `r` | review |
+| Key | Action                  |
+|-----|-------------------------|
+| `v` | vent                    |
+| `f` | flash                   |
+| `s` | state                   |
+| `b` | body                    |
+| `m` | mind                    |
+| `S` | spirit                  |
+| `i` | intention               |
+| `r` | review                  |
 | `c` | refresh / pattern check |
-| `y` | sync local store |
-| `?` / `h` | help |
-| `q` | quit |
+| `y` | sync local store        |
+| `?` / `h` | help              |
+| `q` | quit                    |
 
 ---
 
