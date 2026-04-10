@@ -96,7 +96,7 @@ maps events                   # upcoming events
 maps events --week            # this week only
 
 # people
-maps person chungus           # profile + recent interactions + astrolog status
+maps person grungler          # profile + recent interactions + astrolog status
 maps person --list            # all known people + last contact
 maps person --init-astrolog   # create skeleton profiles for everyone without one
 
