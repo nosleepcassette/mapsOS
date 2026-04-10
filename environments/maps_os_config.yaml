@@ -1,0 +1,25 @@
+environment:
+  name: maps-os
+  class: environments.maps_os_env.MapsOSEnv
+
+training:
+  workers: 4
+  batch_size: 16
+  max_turns_per_episode: 20
+  temperature: 0.8
+
+model:
+  name: openrouter/nousresearch/hermes-3-llama-3.1-405b
+  max_tokens: 1500
+
+reward_weights:
+  state_logged: 0.25
+  correct_state: 0.20
+  track_coverage: 0.20
+  tool_coverage: 0.15
+  no_streak_language: 0.10
+  survival_correct: 0.10
+
+logging:
+  wandb_project: hermes-maps-os
+  log_every_n_steps: 10

@@ -1,0 +1,622 @@
+#!/usr/bin/env python3
+# maps · cassette.help · MIT
+"""
+maps — standalone CLI for maps-os life operating system.
+
+Human-facing and agent-facing. Garden-resilient: if garden is unavailable,
+entries are written to local SQLite store and synced when garden returns.
+
+Usage:
+  maps vent "i'm exhausted and can't stop coding"
+  maps flash "emma"               # sub-threshold phrase capture, no structure
+  maps state thriving "context"
+  maps body sleep none "up since 5am"
+  maps mind flow high "6hr build session"
+  maps spirit connection rising "good call with emma"
+  maps intention water missed "forgot again"
+  maps intention movement met "dog park 45min"
+  maps check           # session start: pull context, check patterns
+  maps pattern         # run pattern weaver on recent data
+  maps review          # cycle review (last 14 days)
+  maps survival        # check/display survival mode
+  maps sync            # flush local store to garden when it's back
+  maps sync --status   # show how many entries are waiting
+  maps tulpa           # multi-line stream capture (full tulpa protocol)
+  maps eval            # show cassette's maps-os performance trend
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+from datetime import date
+from pathlib import Path
+
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(_REPO_ROOT))
+
+from environments.vent_parser import parse_vent, VALID_STATE_TAGS
+from environments.pattern_weaver import weave
+from environments.survival_mode import (
+    evaluate as eval_survival,
+    briefing as survival_briefing,
+    filter_entries_for_survival,
+)
+from environments.local_store import (
+    remember as resilient_remember,
+    recall_resilient,
+    sync_to_garden,
+    count_pending,
+    garden_available,
+)
+
+
+def _today() -> str:
+    return date.today().isoformat()
+
+
+def _remember(content: str, graph: str, dry_run: bool = False) -> str:
+    """
+    Write a single entry. Returns 'garden', 'local', or 'dry'.
+    Prints destination hint only when falling back to local.
+    """
+    if dry_run:
+        print(f"  [dry] garden remember '{content}' --graph {graph}")
+        return "dry"
+    _, dest = resilient_remember(content, graph=graph)
+    if dest == "local":
+        print("  (garden down — saved locally)", file=sys.stderr)
+    return dest
+
+
+def _recall(prefix: str, graph: str, limit: int = 7) -> list[dict]:
+    entries, _ = recall_resilient(prefix, graph=graph, limit=limit)
+    return entries
+
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+
+def cmd_vent(args) -> int:
+    text = " ".join(args.text)
+    if not text.strip():
+        print("usage: maps vent <text>", file=sys.stderr)
+        return 1
+
+    # Log raw text to eidetic before parsing (preserves original voice)
+    _eidetic_log(text, source="maps-vent")
+
+    entries = parse_vent(text, log_date=args.date or _today())
+
+    # Survival mode filter
+    if not args.no_survival_check:
+        recent_states = _recall("STATE:", args.graph, limit=3)
+        survival = eval_survival(recent_states)
+        if survival.active:
+            entries = filter_entries_for_survival(entries)
+            print("survival mode — logging state/body only")
+
+    for e in entries:
+        content = e.to_garden()
+        dest = _remember(content, graph=args.graph, dry_run=args.dry_run)
+        if not args.dry_run:
+            print(f"  {e.track}: {e.category} | {e.status or ''}")
+
+    # Extract action items and route to nota (same path as tulpa)
+    try:
+        from environments.nota_bridge import extract_action_items, nota_available, route_vent_to_nota
+        if nota_available():
+            actions = extract_action_items(text)
+            if actions:
+                print()
+                if not args.dry_run:
+                    routed = route_vent_to_nota(text)
+                    if routed:
+                        print(f"  {len(routed)} action item(s) → nota")
+                        for a in routed:
+                            print(f"    → {a}")
+                else:
+                    print(f"  {len(actions)} action item(s) detected (dry):")
+                    for a in actions[:5]:
+                        print(f"    [dry] → {a}")
+    except Exception:
+        pass
+
+    # Pattern check after vent
+    if not args.no_pattern and not args.dry_run:
+        cmd_check(args, quiet=True)
+
+    return 0
+
+
+def cmd_flash(args) -> int:
+    text = " ".join(args.text)
+    if not text.strip():
+        print("usage: maps flash <phrase>", file=sys.stderr)
+        return 1
+    content = f"FLASH: {args.date or _today()} | {text.strip()}"
+    _remember(content, graph=args.graph, dry_run=args.dry_run)
+    if not args.dry_run:
+        print(f"  · {text.strip()}")
+    return 0
+
+
+def cmd_state(args) -> int:
+    tag = args.tag.lower()
+    if tag not in VALID_STATE_TAGS:
+        print(f"unknown tag '{tag}'. valid: {', '.join(sorted(VALID_STATE_TAGS))}", file=sys.stderr)
+        return 1
+    narrative = " ".join(args.narrative) if args.narrative else ""
+    content = f"STATE: {args.date or _today()} | {tag} | {narrative}"
+    _remember(content, graph=args.graph, dry_run=args.dry_run)
+    if not args.dry_run:
+        print(f"  STATE: {tag}")
+    return 0
+
+
+def cmd_body(args) -> int:
+    note = " ".join(args.note) if args.note else ""
+    content = f"BODY: {args.date or _today()} | {args.category.lower()} | {args.status.lower()} | {note}"
+    _remember(content, graph=args.graph, dry_run=args.dry_run)
+    if not args.dry_run:
+        print(f"  BODY: {args.category} | {args.status}")
+    return 0
+
+
+def cmd_mind(args) -> int:
+    context = " ".join(args.context) if args.context else ""
+    content = f"MIND: {args.date or _today()} | {args.category.lower()} | {args.status.lower()} | {context}"
+    _remember(content, graph=args.graph, dry_run=args.dry_run)
+    if not args.dry_run:
+        print(f"  MIND: {args.category} | {args.status}")
+    return 0
+
+
+def cmd_spirit(args) -> int:
+    note = " ".join(args.note) if args.note else ""
+    content = f"SPIRIT: {args.date or _today()} | {args.category.lower()} | {args.status.lower()} | {note}"
+    _remember(content, graph=args.graph, dry_run=args.dry_run)
+    if not args.dry_run:
+        print(f"  SPIRIT: {args.category} | {args.status}")
+    return 0
+
+
+def cmd_intention(args) -> int:
+    status = args.status.lower()
+    if status not in ("met", "missed", "partial"):
+        print("status must be: met, missed, partial", file=sys.stderr)
+        return 1
+    note = " ".join(args.note) if args.note else ""
+    content = f"INTENTION: {args.name.lower()} | {status} | {args.date or _today()} | {note}"
+    _remember(content, graph=args.graph, dry_run=args.dry_run)
+    if not args.dry_run:
+        symbol = "✓" if status == "met" else ("~" if status == "partial" else "·")
+        print(f"  {symbol} {args.name}: {status}")
+    return 0
+
+
+def _eidetic_log(text: str, source: str) -> None:
+    """Write raw text to eidetic persistence layer if available."""
+    try:
+        import sys as _sys
+        _repo = Path(__file__).resolve().parent.parent
+        _eidetic_path = Path.home() / ".hermes" / "skills" / "eidetic-persistence"
+        _sys.path.insert(0, str(_eidetic_path))
+        from eidetic_logger import log_event
+        log_event("user_input", text, metadata={"source": source, "system": "maps-os"})
+    except Exception:
+        pass  # eidetic is optional — never block on its absence
+
+
+def cmd_tulpa(args) -> int:
+    """
+    Multi-line stream capture mode — full tulpa protocol.
+    Captures an unbounded thought stream, parses at the end.
+    End with Ctrl+D or /done on its own line.
+    """
+    print("tulpa capture mode. I'm holding, not processing.")
+    print("Continue until you're done. End with /done or Ctrl+D.")
+    print()
+
+    lines = []
+    try:
+        while True:
+            try:
+                line = input()
+            except EOFError:
+                break
+            if line.strip().lower() in ("/done", "done"):
+                break
+            lines.append(line)
+    except KeyboardInterrupt:
+        print()
+
+    text = "\n".join(lines).strip()
+    if not text:
+        print("nothing captured.")
+        return 0
+
+    # Log raw text to eidetic first (preserve original voice)
+    _eidetic_log(text, source="maps-tulpa")
+
+    # Parse and log structured entries
+    entries = parse_vent(text, log_date=args.date or _today())
+
+    if not args.no_survival_check:
+        recent_states = _recall("STATE:", args.graph, limit=3)
+        survival = eval_survival(recent_states)
+        if survival.active:
+            entries = filter_entries_for_survival(entries)
+            print("survival mode — logging state/body only")
+
+    print()
+    for e in entries:
+        content = e.to_garden()
+        _remember(content, graph=args.graph, dry_run=args.dry_run)
+        if not args.dry_run:
+            print(f"  {e.track}: {e.category} | {e.status or ''}")
+
+    # Extract action items if nota available
+    try:
+        from environments.nota_bridge import extract_action_items, nota_available
+        if nota_available():
+            actions = extract_action_items(text)
+            if actions:
+                print()
+                print("  action items detected:")
+                for a in actions[:5]:
+                    print(f"  → {a}")
+    except Exception:
+        pass
+
+    # Dominant theme summary
+    if entries:
+        state_entries = [e for e in entries if e.track == "STATE"]
+        if state_entries:
+            dominant = state_entries[0].category
+            print()
+            print(f"  dominant: {dominant}")
+
+    # Pattern check
+    if not args.no_pattern and not args.dry_run:
+        cmd_check(args, quiet=True)
+
+    return 0
+
+
+def cmd_eval(args) -> int:
+    """
+    Show cassette's maps-os performance trend from passive-rl history.
+    Reads from ~/.hermes/logs/.atropos-history.json.
+    """
+    import json as _json
+
+    atropos_path = Path.home() / ".hermes" / "logs" / ".atropos-history.json"
+
+    if not atropos_path.exists():
+        print("no eval history yet.")
+        print("  sessions are evaluated passively — run a few and check back.")
+        return 0
+
+    try:
+        with open(atropos_path) as f:
+            history = _json.load(f)
+    except Exception as e:
+        print(f"could not read history: {e}", file=sys.stderr)
+        return 1
+
+    # Filter to cassette + maps-os sessions
+    sessions = [h for h in history if h.get("agent") in ("cassette", "maps-os", None)]
+    if not sessions:
+        print("no cassette sessions in history.")
+        return 0
+
+    totals = [s.get("total_reward", 0) for s in sessions]
+    recent_10 = totals[-10:]
+    avg_all = sum(totals) / len(totals)
+    avg_recent = sum(recent_10) / len(recent_10)
+    delta = avg_recent - avg_all
+
+    print(f"sessions tracked:  {len(sessions)}")
+    print(f"avg total reward:  {avg_all:.2f}")
+
+    trend = f"+{delta:.2f}" if delta >= 0 else f"{delta:.2f}"
+    print(f"recent 10 avg:     {avg_recent:.2f}  ({trend})")
+    print()
+
+    # Component breakdown
+    all_rewards = [s.get("rewards", {}) for s in sessions if "rewards" in s]
+    if all_rewards:
+        _COMPONENTS = [
+            ("state_logged",      0.25),
+            ("correct_state",     0.20),
+            ("track_coverage",    0.20),
+            ("tool_coverage",     0.15),
+            ("no_streak_language", 0.10),
+            ("survival_correct",  0.10),
+        ]
+        best = ("", -1.0)
+        worst = ("", 2.0)
+        for key, max_weight in _COMPONENTS:
+            vals = [r.get(key, 0) for r in all_rewards]
+            if not vals:
+                continue
+            avg = sum(vals) / len(vals)
+            pct = avg / max_weight if max_weight > 0 else 0
+            if avg > best[1]:
+                best = (key, avg)
+            if avg < worst[1]:
+                worst = (key, avg)
+
+        if best[0]:
+            print(f"strongest:  {best[0]}  ({best[1]:.2f}/{dict(_COMPONENTS).get(best[0], 1):.2f} avg)")
+        if worst[0] and worst[0] != best[0]:
+            print(f"weakest:    {worst[0]}  ({worst[1]:.2f}/{dict(_COMPONENTS).get(worst[0], 1):.2f} avg)")
+
+    print()
+    print("  cassette tracking coverage visible here only.")
+    print("  cycle review will mention coverage %.")
+    return 0
+
+
+def cmd_check(args, quiet: bool = False) -> int:
+    state_entries     = _recall("STATE:",     args.graph, limit=7)
+    body_entries      = _recall("BODY:",      args.graph, limit=7)
+    mind_entries      = _recall("MIND:",      args.graph, limit=7)
+    spirit_entries    = _recall("SPIRIT:",    args.graph, limit=7)
+    intention_entries = _recall("INTENTION:", args.graph, limit=14)
+    flash_entries     = _recall("FLASH:",     args.graph, limit=10)
+
+    survival = eval_survival(state_entries)
+    if survival.active:
+        print(survival_briefing())
+        return 0
+
+    if not state_entries:
+        if not quiet:
+            print("No state logged recently. Vent or just drop a word?")
+        return 0
+
+    arcs = weave(state_entries, body_entries, mind_entries, spirit_entries, intention_entries, flash_entries)
+
+    if not quiet and state_entries:
+        print(f"{_extract_tag(state_entries[-1])} lately.")
+
+    alerts = [a for a in arcs if a.severity == "alert"]
+    insights = [a for a in arcs if a.severity == "insight"]
+
+    if alerts:
+        print(f"→ {alerts[0].message}")
+    elif insights and not quiet:
+        print(f"→ {insights[0].message}")
+
+    # Show pending local entries as quiet reminder
+    n_pending = count_pending(graph=args.graph)
+    if n_pending and not quiet:
+        print(f"  ({n_pending} local entries waiting — run 'maps sync')", file=sys.stderr)
+
+    return 0
+
+
+def cmd_pattern(args) -> int:
+    state_entries     = _recall("STATE:",     args.graph, limit=14)
+    body_entries      = _recall("BODY:",      args.graph, limit=14)
+    mind_entries      = _recall("MIND:",      args.graph, limit=14)
+    spirit_entries    = _recall("SPIRIT:",    args.graph, limit=14)
+    intention_entries = _recall("INTENTION:", args.graph, limit=21)
+    flash_entries     = _recall("FLASH:",     args.graph, limit=10)
+
+    arcs = weave(state_entries, body_entries, mind_entries, spirit_entries, intention_entries, flash_entries)
+
+    if not arcs:
+        print("no patterns detected")
+        return 0
+    for arc in arcs:
+        prefix = "!" if arc.severity == "alert" else "·"
+        print(f"{prefix} [{arc.name}] {arc.message}")
+    return 0
+
+
+def cmd_review(args) -> int:
+    state_entries     = _recall("STATE:",     args.graph, limit=14)
+    body_entries      = _recall("BODY:",      args.graph, limit=14)
+    spirit_entries    = _recall("SPIRIT:",    args.graph, limit=14)
+    intention_entries = _recall("INTENTION:", args.graph, limit=14)
+
+    if not state_entries:
+        print("no state data to review")
+        return 0
+
+    tags = [_extract_tag(e) for e in state_entries]
+    from collections import Counter
+    dominant = Counter(tags).most_common(1)[0][0]
+    met = sum(1 for e in intention_entries if _extract_status(e) == "met")
+    missed = sum(1 for e in intention_entries if _extract_status(e) == "missed")
+
+    print(f"Cycle: {tags[0]} → {tags[-1]}")
+    print()
+    print("What held:")
+    print(f"→ {dominant} was the dominant state")
+    if met or missed:
+        print(f"→ intentions: {met} met, {missed} missed")
+    print()
+    print("What dropped:")
+    all_entries = body_entries + spirit_entries
+    absent = [t for t in ("connection", "movement", "sleep") if not _track_present(all_entries, t)]
+    for item in absent:
+        print(f"→ {item} was mostly absent")
+    if not absent:
+        print("→ no major absences detected")
+    return 0
+
+
+def cmd_survival(args) -> int:
+    state_entries = _recall("STATE:", args.graph, limit=3)
+    survival = eval_survival(state_entries)
+    if survival.active:
+        print(f"survival mode active ({survival.days_in_mode} days)")
+        print()
+        print(survival_briefing())
+    else:
+        tag = _extract_tag(state_entries[-1]) if state_entries else "unknown"
+        print(f"survival mode inactive (last state: {tag})")
+    return 0
+
+
+def cmd_sync(args) -> int:
+    n = count_pending(graph=args.graph)
+
+    if args.status:
+        if n == 0:
+            print("local store: clean")
+        else:
+            print(f"local store: {n} entries pending sync")
+            if not garden_available():
+                print("  garden is currently unavailable")
+        return 0
+
+    if n == 0:
+        print("nothing to sync")
+        return 0
+
+    if not garden_available():
+        print(f"garden unavailable — {n} entries waiting")
+        print("  try again when garden is reachable")
+        return 1
+
+    result = sync_to_garden(graph=args.graph, dry_run=args.dry_run)
+    if result.get("error"):
+        print(f"sync failed: {result['error']}", file=sys.stderr)
+        return 1
+    print(f"synced {result['synced']} → garden")
+    if result["failed"]:
+        print(f"  {result['failed']} failed — will retry next sync")
+    return 0
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+def _extract_tag(entry) -> str:
+    if isinstance(entry, dict):
+        content = entry.get("content", "")
+        parts = [p.strip() for p in content.split("|")]
+        return parts[1].lower() if len(parts) >= 2 else "unknown"
+    return "unknown"
+
+
+def _extract_status(entry) -> str:
+    if isinstance(entry, dict):
+        content = entry.get("content", "")
+        parts = [p.strip() for p in content.split("|")]
+        return parts[1].lower() if len(parts) >= 2 else ""
+    return ""
+
+
+def _track_present(entries: list, keyword: str) -> bool:
+    return any(keyword in e.get("content", "").lower() for e in entries if isinstance(e, dict))
+
+
+# ---------------------------------------------------------------------------
+# Arg parser
+# ---------------------------------------------------------------------------
+
+def build_parser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="maps",
+        description="maps-os — qualitative life operating system",
+    )
+    p.add_argument("--graph", default="cassette")
+    p.add_argument("--date", default=None)
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--no-pattern", action="store_true")
+    p.add_argument("--no-survival-check", action="store_true")
+
+    sub = p.add_subparsers(dest="command")
+
+    v = sub.add_parser("vent",    help="free-form text → structured log")
+    v.add_argument("text", nargs="+")
+
+    fl = sub.add_parser("flash",  help="ultra-low friction phrase capture")
+    fl.add_argument("text", nargs="+")
+
+    st = sub.add_parser("state",  help="log STATE tag")
+    st.add_argument("tag", help=f"one of: {', '.join(sorted(VALID_STATE_TAGS))}")
+    st.add_argument("narrative", nargs="*")
+
+    bo = sub.add_parser("body",   help="log BODY entry")
+    bo.add_argument("category")
+    bo.add_argument("status")
+    bo.add_argument("note", nargs="*")
+
+    mi = sub.add_parser("mind",   help="log MIND entry")
+    mi.add_argument("category")
+    mi.add_argument("status")
+    mi.add_argument("context", nargs="*")
+
+    sp = sub.add_parser("spirit", help="log SPIRIT entry")
+    sp.add_argument("category")
+    sp.add_argument("status")
+    sp.add_argument("note", nargs="*")
+
+    it = sub.add_parser("intention", help="log INTENTION (met/missed/partial)")
+    it.add_argument("name")
+    it.add_argument("status")
+    it.add_argument("note", nargs="*")
+
+    sub.add_parser("check",    help="session start context + pattern check")
+    sub.add_parser("pattern",  help="full pattern weaver output")
+    sub.add_parser("review",   help="cycle review (14 days)")
+    sub.add_parser("survival", help="check/display survival mode")
+
+    sy = sub.add_parser("sync", help="flush local store to garden")
+    sy.add_argument("--status", action="store_true", help="show pending count only")
+
+    sub.add_parser("tulpa",    help="multi-line stream capture (tulpa protocol)")
+    sub.add_parser("eval",     help="show cassette maps-os performance trend")
+
+    return p
+
+
+COMMAND_MAP = {
+    "vent":      cmd_vent,
+    "flash":     cmd_flash,
+    "state":     cmd_state,
+    "body":      cmd_body,
+    "mind":      cmd_mind,
+    "spirit":    cmd_spirit,
+    "intention": cmd_intention,
+    "check":     cmd_check,
+    "pattern":   cmd_pattern,
+    "review":    cmd_review,
+    "survival":  cmd_survival,
+    "sync":      cmd_sync,
+    "tulpa":     cmd_tulpa,
+    "eval":      cmd_eval,
+}
+
+
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if not args.command:
+        if sys.stdin.isatty():
+            try:
+                from environments.tui import run as tui_run
+                tui_run()
+                return 0
+            except Exception:
+                pass
+        return cmd_check(args)
+
+    fn = COMMAND_MAP.get(args.command)
+    if not fn:
+        parser.print_help()
+        return 1
+    return fn(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())
