@@ -290,9 +290,14 @@ def _draw_banner():
     logo = LOGO_LINES if w >= 64 else ["  maps · os"]
     color = AMBER
 
+    # Center the whole block as a unit — not each line independently.
+    # Per-line centering makes the short trailing lines (like "dP") drift
+    # to the wrong column.
+    max_logo_w = max(len(line) for line in logo)
+    left_pad = max(0, (w - max_logo_w) // 2)
+
     for line in logo:
-        pad = max(0, (w - len(line)) // 2)
-        rp(f"{' ' * pad}[bold {color}]{line}[/bold {color}]")
+        rp(f"{' ' * left_pad}[bold {color}]{line}[/bold {color}]")
 
     rp("")
     tag_pad = max(0, (w - len(TAGLINE)) // 2)
@@ -380,22 +385,22 @@ def _draw_dashboard(ctx: dict):
     if ctx["pending"] > 0:
         rp("")
         rp(f"  [dim]⚡ {ctx['pending']} entries in local store  (garden may be down)  [/dim]"
-           f"[{AMBER_DIM}][y] sync[/{AMBER_DIM}]")
+           f"[{AMBER_DIM}]\\[y] sync[/{AMBER_DIM}]")
 
     # ── keys ───────────────────────────────────────────────────────────────
     rp("")
     rule()
     rp(
-        f"  [{AMBER_DIM}][v][/{AMBER_DIM}]ent  "
-        f"[{AMBER_DIM}][f][/{AMBER_DIM}]lash  "
-        f"[{AMBER_DIM}][s][/{AMBER_DIM}]tate  "
-        f"[{AMBER_DIM}][b][/{AMBER_DIM}]ody  "
-        f"[{AMBER_DIM}][m][/{AMBER_DIM}]ind  "
-        f"[{AMBER_DIM}][S][/{AMBER_DIM}]pirit  "
-        f"[{AMBER_DIM}][i][/{AMBER_DIM}]ntention  "
-        f"[{AMBER_DIM}][r][/{AMBER_DIM}]eview  "
-        f"[{AMBER_DIM}][?][/{AMBER_DIM}]help  "
-        f"[{AMBER_DIM}][q][/{AMBER_DIM}]uit"
+        f"  [{AMBER_DIM}]\\[v][/{AMBER_DIM}]ent  "
+        f"[{AMBER_DIM}]\\[f][/{AMBER_DIM}]lash  "
+        f"[{AMBER_DIM}]\\[s][/{AMBER_DIM}]tate  "
+        f"[{AMBER_DIM}]\\[b][/{AMBER_DIM}]ody  "
+        f"[{AMBER_DIM}]\\[m][/{AMBER_DIM}]ind  "
+        f"[{AMBER_DIM}]\\[S][/{AMBER_DIM}]pirit  "
+        f"[{AMBER_DIM}]\\[i][/{AMBER_DIM}]ntention  "
+        f"[{AMBER_DIM}]\\[r][/{AMBER_DIM}]eview  "
+        f"[{AMBER_DIM}]\\[?][/{AMBER_DIM}]help  "
+        f"[{AMBER_DIM}]\\[q][/{AMBER_DIM}]uit"
     )
     rp("")
 
@@ -445,9 +450,9 @@ def _draw_survival(ctx: dict):
     rp("")
     rp("")
     rp(
-        f"  [{AMBER_DIM}][l][/{AMBER_DIM}] log state  "
-        f"[{AMBER_DIM}][v][/{AMBER_DIM}] vent  "
-        f"[{AMBER_DIM}][q][/{AMBER_DIM}] quit"
+        f"  [{AMBER_DIM}]\\[l][/{AMBER_DIM}] log state  "
+        f"[{AMBER_DIM}]\\[v][/{AMBER_DIM}] vent  "
+        f"[{AMBER_DIM}]\\[q][/{AMBER_DIM}] quit"
     )
     rp("")
 
@@ -784,18 +789,18 @@ def _screen_help():
     rp("")
 
     keys = [
-        ("[v]ent",       "free-form text → auto-parsed into STATE/BODY/MIND/SPIRIT"),
-        ("[f]lash",      "sub-threshold phrase capture — just a word, no structure"),
-        ("[s]tate",      "log a STATE tag directly"),
-        ("[b]ody",       "log BODY entry (sleep / pain / hunger / movement / ...)"),
-        ("[m]ind",       "log MIND entry (focus / clarity / overwhelm / flow)"),
-        ("[S]pirit",     "log SPIRIT entry (connection / creativity / purpose / isolation)"),
-        ("[i]ntention",  "log INTENTION: met / missed / partial"),
-        ("[r]eview",     "cycle review — last 14 days, what held / dropped"),
-        ("[c]heck",      "refresh patterns and arcs"),
-        ("[y]sync",      "flush local store to garden (use when garden was down)"),
-        ("[?] / [h]",    "this screen"),
-        ("[q]uit",       "exit"),
+        ("\\[v]ent",       "free-form text → auto-parsed into STATE/BODY/MIND/SPIRIT"),
+        ("\\[f]lash",      "sub-threshold phrase capture — just a word, no structure"),
+        ("\\[s]tate",      "log a STATE tag directly"),
+        ("\\[b]ody",       "log BODY entry (sleep / pain / hunger / movement / ...)"),
+        ("\\[m]ind",       "log MIND entry (focus / clarity / overwhelm / flow)"),
+        ("\\[S]pirit",     "log SPIRIT entry (connection / creativity / purpose / isolation)"),
+        ("\\[i]ntention",  "log INTENTION: met / missed / partial"),
+        ("\\[r]eview",     "cycle review — last 14 days, what held / dropped"),
+        ("\\[c]heck",      "refresh patterns and arcs"),
+        ("\\[y]sync",      "flush local store to garden (use when garden was down)"),
+        ("\\[?] / \\[h]",  "this screen"),
+        ("\\[q]uit",       "exit"),
     ]
 
     for key, desc in keys:

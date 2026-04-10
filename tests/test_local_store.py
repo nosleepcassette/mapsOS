@@ -3,12 +3,13 @@
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from environments.local_store import (
     write, recall, pending, mark_synced, count_pending,
-    sync_to_garden,
+    recall_resilient, sync_to_garden,
 )
 
 
@@ -113,6 +114,62 @@ class TestLocalStore:
         n_before = count_pending(db_path=db)
         # Just verify pending count is untouched without garden
         assert n_before == 1
+
+    def test_recall_resilient_normalizes_garden_envelope(self, monkeypatch):
+        db = _tmp_db()
+        payload = (
+            '{"ok": true, "data": [{"text": "STATE: 2026-04-09 | depleted | test"}], '
+            '"error": "", "elapsed": 0.12}'
+        )
+        monkeypatch.setattr(
+            "environments.local_store.subprocess.run",
+            lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=payload),
+        )
+
+        results, source = recall_resilient("STATE:", db_path=db)
+
+        assert source == "garden"
+        assert results == [{"content": "STATE: 2026-04-09 | depleted | test"}]
+
+    def test_recall_resilient_merges_normalized_garden_with_local(self, monkeypatch):
+        db = _tmp_db()
+        write("STATE: 2026-04-10 | stable | local only", db_path=db)
+        write("STATE: 2026-04-09 | depleted | garden duplicate", db_path=db)
+        payload = (
+            '{"ok": true, "data": ['
+            '{"text": "STATE: 2026-04-09 | depleted | garden duplicate"}'
+            '], "error": "", "elapsed": 0.12}'
+        )
+        monkeypatch.setattr(
+            "environments.local_store.subprocess.run",
+            lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=payload),
+        )
+
+        results, source = recall_resilient("STATE:", limit=5, db_path=db)
+
+        assert source == "merged"
+        assert results == [
+            {"content": "STATE: 2026-04-09 | depleted | garden duplicate"},
+            {"content": "STATE: 2026-04-10 | stable | local only"},
+        ]
+
+    def test_recall_resilient_filters_non_matching_garden_rows(self, monkeypatch):
+        db = _tmp_db()
+        payload = (
+            '{"ok": true, "data": ['
+            '{"text": "maps-os WALKTHROUGH.md human usage guide"}, '
+            '{"text": "STATE: 2026-04-09 | clear | actual entry"}'
+            '], "error": "", "elapsed": 0.12}'
+        )
+        monkeypatch.setattr(
+            "environments.local_store.subprocess.run",
+            lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=payload),
+        )
+
+        results, source = recall_resilient("STATE:", db_path=db)
+
+        assert source == "garden"
+        assert results == [{"content": "STATE: 2026-04-09 | clear | actual entry"}]
 
 
 class TestGardenFailsafe:

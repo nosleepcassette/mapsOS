@@ -15,7 +15,7 @@ import subprocess
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator, Optional
+from typing import Any, Iterator, Optional
 
 
 DEFAULT_DB_PATH = Path.home() / ".maps_os_local.db"
@@ -133,6 +133,53 @@ def garden_available(timeout: int = 3) -> bool:
 # Resilient garden operations
 # ---------------------------------------------------------------------------
 
+def _normalize_garden_entry(entry: Any) -> Optional[dict]:
+    """
+    Normalize garden recall output to the historical {"content": "..."} shape.
+    """
+    if isinstance(entry, str):
+        return {"content": entry}
+
+    if not isinstance(entry, dict):
+        return None
+
+    content = entry.get("content")
+    if isinstance(content, str):
+        return {"content": content}
+
+    text = entry.get("text")
+    if isinstance(text, str):
+        return {"content": text}
+
+    return None
+
+
+def _normalize_garden_recall_payload(payload: Any, prefix: str) -> list[dict]:
+    """
+    Garden has emitted both a raw list and an envelope object over time.
+    Normalize both to a list of {"content": "..."} dicts.
+    """
+    raw_entries: Any = payload
+
+    if isinstance(payload, dict):
+        for key in ("data", "entries", "results"):
+            value = payload.get(key)
+            if isinstance(value, list):
+                raw_entries = value
+                break
+        else:
+            raw_entries = [payload]
+
+    if not isinstance(raw_entries, list):
+        return []
+
+    normalized: list[dict] = []
+    for entry in raw_entries:
+        item = _normalize_garden_entry(entry)
+        if item is not None and item["content"].startswith(prefix):
+            normalized.append(item)
+    return normalized
+
 def remember(content: str, graph: str = "cassette",
              db_path: Path = DEFAULT_DB_PATH) -> tuple[bool, str]:
     """
@@ -177,7 +224,7 @@ def recall_resilient(prefix: str, graph: str = "cassette", limit: int = 7,
             cmd, shell=True, capture_output=True, text=True, timeout=10
         )
         if result.returncode == 0 and result.stdout.strip():
-            garden_entries = json.loads(result.stdout)
+            garden_entries = _normalize_garden_recall_payload(json.loads(result.stdout), prefix=prefix)
             garden_ok = True
     except (subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
         pass
