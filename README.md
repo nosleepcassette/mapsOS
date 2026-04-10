@@ -2,20 +2,30 @@
 
 ![maps-os](mapsOS.png)
 
-A qualitative life operating system for neurodivergent, hyperlexical brains.
+Life tracking that works with how you actually think, not how productivity apps assume you do.
 
 Not a habit tracker. Not a mood journal. Not a productivity app.
 
-maps-os tracks **narrative states**, detects **arc patterns** across days and weeks, and knows when to collapse everything to survival basics. It runs as a standalone CLI and TUI, logs to a garden knowledge graph (with local SQLite fallback), and feeds an Atropos RL training environment.
+maps-os tracks narrative states, surfaces patterns across days and weeks, and knows when to drop everything non-essential. Runs as a standalone CLI and TUI, logs to a knowledge graph with local SQLite fallback, and includes an Atropos-compatible RL training environment.
 
-Built for maps. Forked from [hermes-life-os](https://github.com/nosleepcassette/hermes-life-os).
+---
+
+## Why this exists
+
+Most life-tracking tools are built around numbers. Mood scores out of ten. Sleep quality percentages. Streak counters. Completion rates. The assumption is that if you measure enough dimensions precisely enough, patterns emerge and behavior changes.
+
+That assumption doesn't hold for a lot of people — and it especially doesn't hold when the thing you're trying to track is how you actually feel, not a proxy metric for it.
+
+maps-os started as a fork of a numeric wellness system and ended up as something almost philosophically opposite. Numeric mood scores became qualitative state tags. Nine siloed health dimensions collapsed into three tracks — BODY, MIND, SPIRIT — that can and do diverge wildly from each other. Fixed-schedule briefings (morning, midday, evening, weekly) got replaced with session-triggered logic that adapts to irregular sleep and work patterns. Streak tracking was removed entirely. The RL reward function explicitly penalizes productivity language when you're in a low state.
+
+The result is a system that meets you where you are. It doesn't ask you to score your mood. It asks you to say what's happening, and it listens.
 
 ---
 
 ## What It Tracks
 
 ### STATE
-The primary axis. One tag per session — the dominant emotional/psychological reality.
+The primary axis. One tag per session — the dominant emotional/psychological reality. No scores. No averages.
 
 | Tag | Meaning |
 |-----|---------|
@@ -96,7 +106,7 @@ maps events                   # upcoming events
 maps events --week            # this week only
 
 # people
-maps person grungler          # profile + recent interactions + astrolog status
+maps person chungus           # profile + recent interactions + astrolog status
 maps person --list            # all known people + last contact
 maps person --init-astrolog   # create skeleton profiles for everyone without one
 
@@ -152,6 +162,8 @@ Warm amber palette. STATE-specific colors. Dashboard, survival, vent, flash, sta
 
 After every vent and at session start, the pattern weaver runs across recent entries and surfaces arcs. Each arc has a suppression cooldown — arcs don't repeat every session while conditions persist.
 
+The arc set goes well beyond what most tracking tools attempt. Where a standard system might flag "mood dip for 3 consecutive days," maps-os detects things like `exec_dysfunction` (high resistance + stalled goal + dysregulated state), `resistance_pattern` (same friction source recurring over two weeks), `negative_interaction_pattern` (a specific person showing up negatively across a month), and `intrusive_loop` (the same topic appearing across multiple flash captures without resolution). These are patterns that show up in life but rarely in software.
+
 ### Alert arcs (one at a time, highest priority)
 
 | Arc | Trigger | Cooldown |
@@ -203,6 +215,8 @@ In survival mode:
 
 Exits when a non-low state is logged.
 
+This is one of the more meaningful design decisions in the system. When you're struggling, the last thing you need is more features. The system gets out of the way.
+
 ---
 
 ## Arc Cooldown
@@ -236,19 +250,23 @@ Astrolog skeleton profiles at `~/.hermes/astrolog/` link relational context to b
 ## Installation
 
 ```bash
-git clone https://github.com/nosleepcassette/hermes-maps-os
-cd hermes-maps-os
+git clone https://github.com/nosleepcassette/mapsOS
+cd mapsOS
 pip install rich
 chmod +x bin/maps
 export PATH="$PATH:$(pwd)/bin"
 ```
 
+Add that `export` line to your `~/.zshrc` or `~/.bashrc` to make it permanent.
+
 **Dependencies:**
 - Python 3.10+
 - `rich` (TUI only — CLI works without it)
-- `garden` (knowledge graph — optional, local store is the fallback)
-- `nota` (task routing — optional, detected automatically)
+- [`garden`](https://github.com/nosleepcassette/garden) (knowledge graph — optional, local store is the fallback)
+- [`nota`](https://github.com/nosleepcassette/nota) (task routing — optional, detected automatically)
 - `eidetic` (verbatim logging — optional, detected automatically)
+
+**Agent integration:** [`SKILL.md`](https://gist.github.com/nosleepcassette/6644b13147a064c234a20b2642a4809e) — Hermes operator guide covering session protocol, vent parsing, arc response calibration, and tulpa capture mode.
 
 ---
 
@@ -260,7 +278,7 @@ Reward weights:
 
 | Component | Weight | What it measures |
 |-----------|--------|-----------------|
-| `state_logged` | 0.25 | Did maps log STATE? |
+| `state_logged` | 0.25 | Did the user log STATE? |
 | `correct_state` | 0.20 | Valid and contextually appropriate tag |
 | `track_coverage` | 0.20 | BODY/MIND/SPIRIT covered |
 | `tool_coverage` | 0.15 | Expected tools used |
@@ -277,7 +295,7 @@ Passive evaluation: `~/.hermes/hooks/post_session_life_os.py` fires after sessio
 python3 -m pytest tests/ -v
 ```
 
-196 tests covering: vent parser, pattern weaver (ARCs 1–25), arc cooldown, survival mode, CLI commands, local store, RL environment.
+198 tests covering: vent parser, pattern weaver (ARCs 1–25), arc cooldown, survival mode, CLI commands, local store, RL environment.
 
 ---
 
@@ -308,7 +326,7 @@ hermes-maps-os/
 │   ├── test_maps_os_config.py  — config loader + person_context tests
 │   └── test_local_store.py     — local SQLite store tests
 ├── scripts/
-│   └── migrate_legacy.py       — life-os → maps-os migrator
+│   └── migrate_legacy.py       — legacy migrator
 └── docs/
     ├── SETUP.md                — install + configuration guide
     ├── AGENT_GUIDE.md          — guide for cassette and other agents
@@ -318,14 +336,14 @@ hermes-maps-os/
 
 ---
 
-## Migration from life-os
+## Migration
 
 ```bash
 python3 scripts/migrate_legacy.py --dry-run   # preview
 python3 scripts/migrate_legacy.py             # migrate
 ```
 
-Converts: `MOOD` (1–10) → `STATE` tag, `ENERGY` → `BODY`, `HABIT` → `INTENTION`. Original values preserved in `legacy_` fields.
+Converts numeric mood scores → STATE tags, energy → BODY, habits → INTENTIONS. Original values preserved in `legacy_` fields.
 
 ---
 
