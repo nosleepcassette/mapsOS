@@ -7,6 +7,7 @@ Output: list of Arc objects (type, message, severity)
 
 Arc severity: "alert" (act now) vs "insight" (worth noting)
 """
+
 from __future__ import annotations
 
 import re
@@ -25,9 +26,9 @@ HIGH_STATES = frozenset(["thriving"])
 @dataclass
 class Arc:
     name: str
-    severity: str       # "alert" | "insight" | "survival"
+    severity: str  # "alert" | "insight" | "survival"
     message: str
-    data: dict          # supporting data for the arc
+    data: dict  # supporting data for the arc
 
     def __repr__(self) -> str:
         return f"Arc({self.name!r}, {self.severity!r})"
@@ -36,6 +37,7 @@ class Arc:
 # ---------------------------------------------------------------------------
 # Entry normalization
 # ---------------------------------------------------------------------------
+
 
 def _tag(entry: Any) -> str:
     """Extract the relevant tag/category/status from a raw dict or Entry."""
@@ -80,6 +82,7 @@ def _note(entry: Any) -> str:
 # Arc detectors (each returns Optional[Arc])
 # ---------------------------------------------------------------------------
 
+
 def _arc_manic_spike(
     state_entries: list, body_entries: list, mind_entries: list
 ) -> Optional[Arc]:
@@ -104,25 +107,51 @@ def _arc_manic_spike(
     return None
 
 
-def _arc_isolation_creep(spirit_entries: list) -> Optional[Arc]:
+def _arc_isolation_creep(
+    spirit_entries: list, person_entries: list = None
+) -> Optional[Arc]:
     """ARC 2 — Isolation Creep"""
     isolation_days = sum(
-        1 for e in spirit_entries if _tag(e) == "isolation" and _status(e) in ("high", "present", "rising")
+        1
+        for e in spirit_entries
+        if _tag(e) == "isolation" and _status(e) in ("high", "present", "rising")
     )
     connection_days = sum(1 for e in spirit_entries if _tag(e) == "connection")
 
-    # Check last N entries for absence of connection
     recent_n = min(len(spirit_entries), 10)
     recent_spirit = spirit_entries[-recent_n:]
     days_no_connection = sum(1 for e in recent_spirit if _tag(e) != "connection")
 
     if isolation_days >= 3 or days_no_connection >= 5:
         n = isolation_days if isolation_days >= 3 else days_no_connection
+
+        most_recent_name = ""
+        if person_entries:
+            for e in person_entries:
+                content = e.get("content", "") if isinstance(e, dict) else ""
+                if content.startswith("PERSON:"):
+                    parts = content.split("|")
+                    if len(parts) >= 2:
+                        note = parts[1].strip()
+                        if "|" in note:
+                            name = note.split("|")[0].strip()
+                            if name:
+                                most_recent_name = name
+                                break
+
+        if most_recent_name:
+            message = f"Haven't connected with {most_recent_name} in {n} days. Still relevant?"
+        else:
+            message = f"Haven't logged connection in {n} days. Who do you want to reach out to?"
+
         return Arc(
             name="isolation_creep",
             severity="alert",
-            message=f"Haven't logged connection in {n} days. Who do you want to reach out to?",
-            data={"isolation_days": isolation_days, "no_connection_days": days_no_connection},
+            message=message,
+            data={
+                "isolation_days": isolation_days,
+                "no_connection_days": days_no_connection,
+            },
         )
     return None
 
@@ -187,6 +216,7 @@ def _arc_intention_miss_pattern(intention_entries: list) -> list[Arc]:
     """ARC 6 — Intentions Missed Pattern (returns one Arc per missed intention)"""
     # Group by intention name
     from collections import defaultdict
+
     by_name: dict[str, list[str]] = defaultdict(list)
     for e in intention_entries:
         content = e.get("content", "") if isinstance(e, dict) else ""
@@ -209,12 +239,14 @@ def _arc_intention_miss_pattern(intention_entries: list) -> list[Arc]:
             else:
                 break
         if consecutive_misses >= 4:
-            arcs.append(Arc(
-                name="intention_miss_pattern",
-                severity="insight",
-                message=f"{name.title()} has been hard to hit. Want to adjust it, or just note it as context?",
-                data={"intention": name, "consecutive_misses": consecutive_misses},
-            ))
+            arcs.append(
+                Arc(
+                    name="intention_miss_pattern",
+                    severity="insight",
+                    message=f"{name.title()} has been hard to hit. Want to adjust it, or just note it as context?",
+                    data={"intention": name, "consecutive_misses": consecutive_misses},
+                )
+            )
     return arcs
 
 
@@ -256,6 +288,7 @@ def _arc_thriving_streak(state_entries: list) -> Optional[Arc]:
 # New arc detectors (Arcs 9, 12, 13, 15 — approved 2026-04-09)
 # ---------------------------------------------------------------------------
 
+
 def _arc_productivity_spiral(
     state_entries: list, mind_entries: list, spirit_entries: list
 ) -> Optional[Arc]:
@@ -267,15 +300,27 @@ def _arc_productivity_spiral(
 
     # Work/output language in recent state notes
     _WORK_KW = [
-        "working", "building", "coding", "shipping", "output", "project",
-        "deploy", "launched", "shipped", "pushed", "wrote", "produced",
+        "working",
+        "building",
+        "coding",
+        "shipping",
+        "output",
+        "project",
+        "deploy",
+        "launched",
+        "shipped",
+        "pushed",
+        "wrote",
+        "produced",
     ]
     recent_notes = [_note(e).lower() for e in state_entries[-5:]]
     has_work_language = any(any(kw in note for kw in _WORK_KW) for note in recent_notes)
     if not has_work_language:
         # Also check mind flow/hyper as a proxy for output mode
         mind_focus = [e for e in mind_entries if _tag(e) in ("flow", "focus")]
-        has_work_language = any(_status(e) in ("high", "hyper") for e in mind_focus[-3:])
+        has_work_language = any(
+            _status(e) in ("high", "hyper") for e in mind_focus[-3:]
+        )
 
     if not has_work_language:
         return None
@@ -300,12 +345,24 @@ def _arc_productivity_spiral(
 def _arc_catastrophizing_spike(state_entries: list) -> Optional[Arc]:
     """ARC 12 — Catastrophizing Spike"""
     _CATASTROPHIZING = [
-        "everything is fucked", "it's all ruined", "its all ruined",
-        "complete failure", "nothing works", "it's over", "its over",
-        "everything is broken", "ruined everything", "totally hopeless",
-        "total disaster", "can't fix this", "cant fix this",
-        "everything is falling apart", "nothing will ever",
-        "always fails", "never works", "it's all wrong",
+        "everything is fucked",
+        "it's all ruined",
+        "its all ruined",
+        "complete failure",
+        "nothing works",
+        "it's over",
+        "its over",
+        "everything is broken",
+        "ruined everything",
+        "totally hopeless",
+        "total disaster",
+        "can't fix this",
+        "cant fix this",
+        "everything is falling apart",
+        "nothing will ever",
+        "always fails",
+        "never works",
+        "it's all wrong",
     ]
     recent_notes = [_note(e).lower() for e in state_entries[-3:]]
     for note in recent_notes:
@@ -327,11 +384,33 @@ def _arc_intrusive_loop(flash_entries: list) -> Optional[Arc]:
     if len(flash_entries) < 3:
         return None
 
-    _STOP = frozenset([
-        "that", "this", "with", "have", "been", "from", "they", "what",
-        "when", "just", "some", "like", "into", "than", "then", "them",
-        "were", "very", "your", "more", "also", "here", "there",
-    ])
+    _STOP = frozenset(
+        [
+            "that",
+            "this",
+            "with",
+            "have",
+            "been",
+            "from",
+            "they",
+            "what",
+            "when",
+            "just",
+            "some",
+            "like",
+            "into",
+            "than",
+            "then",
+            "them",
+            "were",
+            "very",
+            "your",
+            "more",
+            "also",
+            "here",
+            "there",
+        ]
+    )
 
     words: list[str] = []
     for e in flash_entries[-10:]:
@@ -340,7 +419,7 @@ def _arc_intrusive_loop(flash_entries: list) -> Optional[Arc]:
         parts = content.split("|", 1)
         if len(parts) > 1:
             text = parts[1].strip().lower()
-            tokens = re.findall(r'\b[a-z]{4,}\b', text)
+            tokens = re.findall(r"\b[a-z]{4,}\b", text)
             words.extend(t for t in tokens if t not in _STOP)
 
     if not words:
@@ -369,15 +448,34 @@ def _arc_planning_hyperfocus(
     """ARC 15 — Planning Hyperfocus (ADHD planning trap)"""
     recent_states = [_tag(e) for e in state_entries[-3:]]
     # Don't fire in crisis — survival takes priority
-    in_crisis = any(t in ("depleted", "grieving", "surviving", "flooded") for t in recent_states)
+    in_crisis = any(
+        t in ("depleted", "grieving", "surviving", "flooded") for t in recent_states
+    )
     if in_crisis:
         return None
 
     _PLANNING_KW = [
-        "plan", "planning", "design", "architecture", "structure", "system",
-        "organize", "organising", "roadmap", "strategy", "framework", "schema",
-        "workflow", "process", "outline", "sketch", "mapping", "spec",
-        "todo", "checklist", "to-do",
+        "plan",
+        "planning",
+        "design",
+        "architecture",
+        "structure",
+        "system",
+        "organize",
+        "organising",
+        "roadmap",
+        "strategy",
+        "framework",
+        "schema",
+        "workflow",
+        "process",
+        "outline",
+        "sketch",
+        "mapping",
+        "spec",
+        "todo",
+        "checklist",
+        "to-do",
     ]
     recent_notes = [_note(e).lower() for e in state_entries[-3:]]
     has_planning_language = any(
@@ -399,7 +497,8 @@ def _arc_planning_hyperfocus(
     # No intentions logged today — planning without doing
     today = date.today().isoformat()
     today_intentions = [
-        e for e in intention_entries
+        e
+        for e in intention_entries
         if today in (e.get("content", "") if isinstance(e, dict) else "")
     ]
     if today_intentions:
@@ -421,9 +520,17 @@ def _arc_planning_hyperfocus(
 # ---------------------------------------------------------------------------
 
 _AVOIDANCE_PHRASES = [
-    "i'll just", "do it later", "deal with it later", "not right now",
-    "can't face", "don't want to deal", "pushing it off", "ignoring it",
-    "maybe tomorrow", "i keep putting off", "been avoiding",
+    "i'll just",
+    "do it later",
+    "deal with it later",
+    "not right now",
+    "can't face",
+    "don't want to deal",
+    "pushing it off",
+    "ignoring it",
+    "maybe tomorrow",
+    "i keep putting off",
+    "been avoiding",
 ]
 
 
@@ -473,7 +580,6 @@ def _arc_habit_candidate(intention_entries: list) -> list[Arc]:
     """ARC 19 — Frequently-logged intention → suggest converting to harsh habit."""
     if not intention_entries:
         return []
-    # Count per intention name
     counts: Counter = Counter()
     met_counts: Counter = Counter()
     for e in intention_entries:
@@ -492,21 +598,161 @@ def _arc_habit_candidate(intention_entries: list) -> list[Arc]:
             met = met_counts.get(name, 0)
             rate = met / total
             if rate >= 0.6:
-                arcs.append(Arc(
-                    name="habit_candidate",
-                    severity="insight",
-                    message=(
-                        f"'{name}' logged {total} times, met {met}/{total}. "
-                        f"Worth adding to harsh as a habit?"
-                    ),
-                    data={"intention": name, "total": total, "met": met},
-                ))
+                arcs.append(
+                    Arc(
+                        name="habit_candidate",
+                        severity="insight",
+                        message=(
+                            f"'{name}' logged {total} times, met {met}/{total}. "
+                            f"Worth adding to harsh as a habit?"
+                        ),
+                        data={"intention": name, "total": total, "met": met},
+                    )
+                )
     return arcs
+
+
+def _arc_decision_pile(decision_entries: list) -> Optional[Arc]:
+    """ARC 20 — Decision pile (unresolved decisions accumulating)."""
+    if len(decision_entries) < 3:
+        return None
+
+    from datetime import datetime
+
+    now = datetime.now()
+    recent = []
+    for e in decision_entries:
+        content = e.get("content", "") if isinstance(e, dict) else ""
+        if content.startswith("DECISION:"):
+            parts = content.split("|")
+            if len(parts) >= 1:
+                date_part = parts[0].replace("DECISION:", "").strip()
+                try:
+                    entry_date = datetime.strptime(date_part, "%Y-%m-%d")
+                    if (now - entry_date).days <= 7:
+                        recent.append(content)
+                except Exception:
+                    recent.append(content)
+
+    if len(recent) >= 3:
+        oldest = recent[0] if recent else ""
+        desc = ""
+        if oldest:
+            parts = oldest.split("|")
+            if len(parts) > 1:
+                desc = parts[1].strip()[:50]
+        return Arc(
+            name="decision_pile",
+            severity="insight",
+            message=f"you had {len(recent)} unresolved decision points this week. want to revisit any of them?",
+            data={"count": len(recent), "oldest": desc},
+        )
+    return None
+
+    from datetime import datetime, timedelta
+
+    now = datetime.now()
+    recent = []
+    for e in decision_entries:
+        content = e.get("content", "") if isinstance(e, dict) else ""
+        if content.startswith("DECISION:"):
+            parts = content.split("|", 1)
+            if len(parts) > 1:
+                date_part = parts[0].replace("DECISION:", "").strip()
+                try:
+                    entry_date = datetime.strptime(date_part, "%Y-%m-%d")
+                    if (now - entry_date).days <= 7:
+                        recent.append(content)
+                except Exception:
+                    recent.append(content)
+
+    if len(recent) >= 3:
+        oldest = recent[0] if recent else ""
+        desc = ""
+        if oldest:
+            parts = oldest.split("|")
+            if len(parts) > 1:
+                desc = parts[1].strip()[:50]
+        return Arc(
+            name="decision_pile",
+            severity="insight",
+            message=f"you had {len(recent)} unresolved decision points this week. want to revisit any of them?",
+            data={"count": len(recent), "oldest": desc},
+        )
+    return None
+
+
+def _arc_trigger_pattern(trigger_entries: list) -> Optional[Arc]:
+    """ARC 21 — Trigger pattern (same trigger source recurring)."""
+    if len(trigger_entries) < 3:
+        return None
+
+    sources: Counter = Counter()
+    for e in trigger_entries:
+        content = e.get("content", "") if isinstance(e, dict) else ""
+        if content.startswith("TRIGGER:"):
+            parts = content.split("|")
+            if len(parts) > 1:
+                note = parts[1].strip()
+                if "|" in note:
+                    source = note.split("|")[0].strip()[:30]
+                    if source:
+                        sources[source] += 1
+
+    for source, count in sources.items():
+        if count >= 3:
+            return Arc(
+                name="trigger_pattern",
+                severity="insight",
+                message=f"you've logged {count} triggers from {source}. that's a pattern worth knowing.",
+                data={"source": source, "count": count},
+            )
+    return None
+
+
+def _arc_goal_stall(goal_entries: list) -> Optional[Arc]:
+    """ARC 22 — Goal stall (goals open for 14+ days)."""
+    if not goal_entries:
+        return None
+
+    from datetime import datetime, timedelta
+
+    now = datetime.now()
+    stalled = []
+
+    for e in goal_entries:
+        content = e.get("content", "") if isinstance(e, dict) else ""
+        if content.startswith("GOAL:"):
+            parts = content.split("|")
+            if len(parts) >= 3:
+                goal_desc = parts[1].strip() if len(parts) > 1 else ""
+                status = parts[2].strip() if len(parts) > 2 else ""
+                if status == "open":
+                    date_str = parts[0].replace("GOAL:", "").strip()
+                    try:
+                        entry_date = datetime.strptime(date_str, "%Y-%m-%d")
+                        days_open = (now - entry_date).days
+                        if days_open >= 14:
+                            stalled.append((goal_desc, days_open))
+                    except Exception:
+                        pass
+
+    if stalled:
+        stalled.sort(key=lambda x: x[1], reverse=True)
+        goal, days = stalled[0]
+        return Arc(
+            name="goal_stall",
+            severity="insight",
+            message=f"'{goal}' has been open for {days} days. still relevant?",
+            data={"goal": goal, "days": days},
+        )
+    return None
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
+
 
 def weave(
     state_entries: list,
@@ -515,6 +761,10 @@ def weave(
     spirit_entries: list,
     intention_entries: list,
     flash_entries: list = None,
+    decision_entries: list = None,
+    trigger_entries: list = None,
+    goal_entries: list = None,
+    person_entries: list = None,
 ) -> list[Arc]:
     """
     Run all arc detectors in priority order.
@@ -523,6 +773,14 @@ def weave(
     """
     if flash_entries is None:
         flash_entries = []
+    if decision_entries is None:
+        decision_entries = []
+    if trigger_entries is None:
+        trigger_entries = []
+    if goal_entries is None:
+        goal_entries = []
+    if person_entries is None:
+        person_entries = []
 
     arcs: list[Arc] = []
 
@@ -530,7 +788,7 @@ def weave(
     alert_detectors = [
         lambda: _arc_manic_spike(state_entries, body_entries, mind_entries),
         lambda: _arc_body_neglect(body_entries, mind_entries),
-        lambda: _arc_isolation_creep(spirit_entries),
+        lambda: _arc_isolation_creep(spirit_entries, person_entries),
         lambda: _arc_state_dip_holding(state_entries),
     ]
     for detector in alert_detectors:
@@ -539,14 +797,16 @@ def weave(
             arcs.append(arc)
             break  # one alert at a time
 
-    # Insights — all that apply (arcs 5-9, 12, 15, 17, 18)
+    # Insights — all that apply (arcs 5-9, 12, 15, 17, 18, 20, 21, 22)
     insight_detectors = [
         lambda: _arc_spirit_rising(state_entries, spirit_entries),
         lambda: _arc_post_manic_drop(state_entries),
         lambda: _arc_thriving_streak(state_entries),
         lambda: _arc_productivity_spiral(state_entries, mind_entries, spirit_entries),
         lambda: _arc_catastrophizing_spike(state_entries),
-        lambda: _arc_planning_hyperfocus(state_entries, mind_entries, intention_entries),
+        lambda: _arc_planning_hyperfocus(
+            state_entries, mind_entries, intention_entries
+        ),
         lambda: _arc_substance_coping(state_entries, body_entries),
         lambda: _arc_avoidance_language(state_entries),
     ]
@@ -561,13 +821,18 @@ def weave(
     # Habit candidates (ARC 19) — multiple possible
     arcs.extend(_arc_habit_candidate(intention_entries))
 
+    # ARC 20, 21, 22 — new decision/trigger/goal arcs
+    arcs.append(_arc_decision_pile(decision_entries))
+    arcs.append(_arc_trigger_pattern(trigger_entries))
+    arcs.append(_arc_goal_stall(goal_entries))
+
     # Intrusive loop — requires flash entries
     if flash_entries:
         arc = _arc_intrusive_loop(flash_entries)
         if arc is not None:
             arcs.append(arc)
 
-    return arcs
+    return [a for a in arcs if a is not None]
 
 
 def check_survival_trigger(state_entries: list) -> bool:

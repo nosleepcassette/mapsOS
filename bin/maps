@@ -48,6 +48,7 @@ from environments.local_store import (
     count_pending,
     garden_available,
 )
+from environments.viz import render_trend, render_viz, render_trend_simple
 
 
 def _today() -> str:
@@ -104,7 +105,7 @@ def cmd_vent(args) -> int:
 
     # Extract action items and route to nota (same path as tulpa)
     try:
-        from environments.nota_bridge import extract_action_items, nota_available, route_vent_to_nota
+        from environments.nota_bridge import extract_action_items, nota_available, route_vent_to_nota, nota_add
         if nota_available():
             actions = extract_action_items(text)
             if actions:
@@ -119,6 +120,30 @@ def cmd_vent(args) -> int:
                     print(f"  {len(actions)} action item(s) detected (dry):")
                     for a in actions[:5]:
                         print(f"    [dry] → {a}")
+
+            for e in entries:
+                if e.track == "EVENT":
+                    note = e.note
+                    if "|" in note:
+                        parts = note.split("|")
+                        if len(parts) >= 2:
+                            event_date = parts[0].strip()
+                            desc = parts[1].strip()
+                            try:
+                                nota_add(desc, project="calendar", due=event_date)
+                            except Exception:
+                                pass
+                elif e.track == "DEADLINE":
+                    note = e.note
+                    if "|" in note:
+                        parts = note.split("|")
+                        if len(parts) >= 2:
+                            desc = parts[1].strip()
+                            urgency = e.status or "medium"
+                            try:
+                                nota_add(desc, project="tasks", due=None, priority=urgency)
+                            except Exception:
+                                pass
     except Exception:
         pass
 
@@ -305,7 +330,6 @@ def cmd_eval(args) -> int:
         print(f"could not read history: {e}", file=sys.stderr)
         return 1
 
-    # Filter to cassette + maps-os sessions
     sessions = [h for h in history if h.get("agent") in ("cassette", "maps-os", None)]
     if not sessions:
         print("no cassette sessions in history.")
@@ -324,7 +348,6 @@ def cmd_eval(args) -> int:
     print(f"recent 10 avg:     {avg_recent:.2f}  ({trend})")
     print()
 
-    # Component breakdown
     all_rewards = [s.get("rewards", {}) for s in sessions if "rewards" in s]
     if all_rewards:
         _COMPONENTS = [
@@ -342,7 +365,6 @@ def cmd_eval(args) -> int:
             if not vals:
                 continue
             avg = sum(vals) / len(vals)
-            pct = avg / max_weight if max_weight > 0 else 0
             if avg > best[1]:
                 best = (key, avg)
             if avg < worst[1]:
@@ -356,6 +378,219 @@ def cmd_eval(args) -> int:
     print()
     print("  cassette tracking coverage visible here only.")
     print("  cycle review will mention coverage %.")
+    return 0
+
+
+def cmd_trend(args) -> int:
+    """Show state trend chart."""
+    days = args.days if hasattr(args, "days") else 90
+
+    entries = _recall("STATE:", args.graph, limit=200)
+    if not entries:
+        print("no state data")
+        return 0
+
+    try:
+        result = render_trend(entries, days=days)
+        if result:
+            from rich.console import Console
+            console = Console()
+            console.print(result)
+            return 0
+    except Exception:
+        pass
+
+    print(render_trend_simple(entries, days=days))
+    return 0
+
+
+def cmd_viz(args) -> int:
+    """Show visualization dashboard."""
+    body = _recall("BODY:", args.graph, limit=30)
+    state = _recall("STATE:", args.graph, limit=30)
+
+    try:
+        result = render_viz(body, state, arc_history=None)
+        if result:
+            from rich.console import Console
+            console = Console()
+            console.print(result)
+            return 0
+    except Exception as e:
+        print(f"viz not available: {e}", file=sys.stderr)
+
+    print("Rich not available — install rich for viz")
+    return 0
+
+
+def cmd_connect(args) -> int:
+    """Log connection with a person."""
+    from environments.maps_os_config import known_people
+
+    if args.status:
+        entries = _recall("PERSON:", args.graph, limit=100)
+        if not entries:
+            print("no person connections logged")
+            return 0
+
+        people = known_people()
+        seen: dict[str, str] = {}
+
+        for e in entries:
+            content = e.get("content", "")
+            if content.startswith("PERSON:"):
+                parts = content.split("|")
+                if len(parts) >= 2:
+                    note = parts[1].strip()
+                    name = ""
+                    if "|" in note:
+                        name = note.split("|")[0].strip()
+                    else:
+                        name = note.strip()
+                    if not name:
+                        continue
+                    date_part = parts[0].replace("PERSON:", "").strip()
+                    seen[name.lower()] = date_part
+
+        for person in sorted(seen):
+            date_str = seen[person]
+            print(f"{person}: last connection {date_str}")
+        return 0
+
+    name = args.person[0].lower() if args.person else ""
+    if not name:
+        print("usage: maps connect <person> [--note text]")
+        return 1
+
+    note = args.note[0] if args.note else "connected"
+
+    content1 = f"SPIRIT: {_today()} | connection | rising | with {name}: {note}"
+    content2 = f"PERSON: {_today()} | {name} | {note} | positive"
+
+    _remember(content1, graph=args.graph, dry_run=args.dry_run)
+    _remember(content2, graph=args.graph, dry_run=args.dry_run)
+
+    if not args.dry_run:
+        print(f"  connected with {name}")
+    return 0
+
+
+def cmd_goal(args) -> int:
+    """Goal management."""
+    if args.list:
+        entries = _recall("GOAL:", args.graph, limit=50)
+        if not entries:
+            print("no open goals")
+            return 0
+
+        from datetime import datetime, timedelta
+        now = datetime.now().date()
+        goals = []
+
+        for e in entries:
+            content = e.get("content", "")
+            if not content.startswith("GOAL:"):
+                continue
+            parts = content.split("|")
+            if len(parts) >= 3:
+                status = parts[2].strip()
+                if status == "open":
+                    date_str = parts[0].replace("GOAL:", "").strip()
+                    goal_desc = parts[1].strip()
+                    try:
+                        entry_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                        days_open = (now - entry_date).days
+                        goals.append((goal_desc, date_str, days_open))
+                    except Exception:
+                        goals.append((goal_desc, date_str, 0))
+
+        if not goals:
+            print("no open goals")
+            return 0
+
+        for goal, date_str, days in sorted(goals, key=lambda x: x[2], reverse=True):
+            due_str = ""
+            print(f"{goal}  [due: {due_str}]  ({days} days open)")
+        return 0
+
+    if args.done:
+        phrase = args.done[0] if args.done else ""
+        entries = _recall("GOAL:", args.graph, limit=50)
+        matched = None
+
+        for e in entries:
+            content = e.get("content", "")
+            if content.startswith("GOAL:") and phrase.lower() in content.lower():
+                parts = content.split("|")
+                if len(parts) >= 2:
+                    matched = parts[1].strip()
+                    break
+
+        if matched:
+            content = f"GOAL: {_today()} | {matched} | done"
+            _remember(content, graph=args.graph, dry_run=args.dry_run)
+            if not args.dry_run:
+                print(f"  goal marked done: {matched}")
+        else:
+            print(f"  goal not found: {phrase}")
+        return 0
+
+    text = args.goal[0] if args.goal else ""
+    if not text:
+        print("usage: maps goal <text> [--due date]")
+        return 1
+
+    due = "none"
+    if args.due:
+        try:
+            from environments.date_resolver import resolve_date
+            due_date = resolve_date(args.due[0])
+            if due_date:
+                due = due_date.isoformat()
+        except Exception:
+            due = args.due[0]
+
+    content = f"GOAL: {_today()} | {text} | {due} | open"
+    _remember(content, graph=args.graph, dry_run=args.dry_run)
+    if not args.dry_run:
+        print(f"  goal added: {text}")
+    return 0
+
+
+def cmd_events(args) -> int:
+    """Show upcoming events."""
+    entries = _recall("EVENT:", args.graph, limit=30)
+    if not entries:
+        print("no upcoming events")
+        return 0
+
+    from datetime import datetime, date as date_module
+    today = datetime.now().date()
+    events = []
+
+    for e in entries:
+        content = e.get("content", "")
+        if not content.startswith("EVENT:"):
+            continue
+        parts = content.split("|")
+        if len(parts) >= 2:
+            note = parts[1].strip()
+            if "|" in note:
+                date_str = note.split("|")[0].strip()
+                desc = note.split("|")[1].strip() if len(note.split("|")) > 1 else ""
+                try:
+                    event_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                    if event_date >= today:
+                        events.append((event_date, desc))
+                except Exception:
+                    pass
+
+    if not events:
+        print("no upcoming events")
+        return 0
+
+    for event_date, desc in sorted(events):
+        print(f"{event_date.isoformat()}  {desc}")
     return 0
 
 
@@ -576,6 +811,26 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("tulpa",    help="multi-line stream capture (tulpa protocol)")
     sub.add_parser("eval",     help="show cassette maps-os performance trend")
 
+    tr = sub.add_parser("trend",  help="show state trend chart")
+    tr.add_argument("--days", type=int, default=90, help="number of days (default 90)")
+    tr.add_argument("--full", action="store_true", help="show all-time")
+
+    sub.add_parser("viz",    help="show visualization dashboard")
+
+    co = sub.add_parser("connect", help="log connection with a person")
+    co.add_argument("person", nargs="*", help="person name")
+    co.add_argument("--note", nargs="*", help="note about the connection")
+    co.add_argument("--status", action="store_true", help="show connection status")
+
+    go = sub.add_parser("goal", help="manage goals")
+    go.add_argument("goal", nargs="*", help="goal text")
+    go.add_argument("--due", nargs="*", help="due date")
+    go.add_argument("--list", action="store_true", help="list open goals")
+    go.add_argument("--done", nargs="*", help="mark goal done")
+
+    ev = sub.add_parser("events", help="show upcoming events")
+    ev.add_argument("--week", action="store_true", help="this week only")
+
     return p
 
 
@@ -594,6 +849,11 @@ COMMAND_MAP = {
     "sync":      cmd_sync,
     "tulpa":     cmd_tulpa,
     "eval":      cmd_eval,
+    "trend":     cmd_trend,
+    "viz":       cmd_viz,
+    "connect":  cmd_connect,
+    "goal":    cmd_goal,
+    "events":  cmd_events,
 }
 
 
