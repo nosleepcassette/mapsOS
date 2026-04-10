@@ -220,7 +220,7 @@ If garden is unavailable, entries write to `~/.maps_os_local.db`. When garden co
 
 ```bash
 maps person --list            # everyone + last contact
-maps person maggie            # recent interactions, role, astrolog status
+maps person zendaya           # recent interactions, role, astrolog status
 maps person --init-astrolog   # scaffold ~/.hermes/astrolog/{name}_profile.json
 ```
 
