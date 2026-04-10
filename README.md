@@ -1,6 +1,6 @@
 # mapsOS
 
-![mapsOS](mapsos.png)
+![mapsOS](mapsOS.png)
 
 Life tracking that works with how you actually think, not how productivity apps assume you do.
 
