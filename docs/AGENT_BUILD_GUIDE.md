@@ -1,4 +1,4 @@
-# maps-os: Agent Build Guide — Phase 2.7
+# maps-os: Agent Build Guide — Phase 2.8
 **Date:** 2026-04-10
 **For:** codex / opencode agent
 **Repo:** `/Users/maps/dev/hermes-maps-os/`
@@ -7,13 +7,16 @@ Read this whole document before starting. Do not start stage N+1 until stage N p
 
 **Current test state: 196 passing, 0 failing.**
 
-## ✅ Stage 0 — COMPLETE (2026-04-10)
+## ✅ Phases 2.6 + 2.7 — COMPLETE
 
-7 correctness bugs fixed (EVENT/DEADLINE wiring, goal_stall field index, trigger/event patterns, dead code, date_resolver duplicate, viz body panel date-blind). ARC 15 planning_hyperfocus fixed. CLI schema fixes for `maps goal`, `maps events`, `maps check`, `maps pattern`. Tests: `tests/test_phase26_fixes.py`, `tests/test_cli_commands.py`.
-
-## ✅ Stage 6 — COMPLETE (2026-04-10)
-
-`person_context()` and `person_birth_hint()` added to `environments/maps_os_config.py`. `maps person <name>`, `maps person --list`, `maps person --init-astrolog` implemented in `bin/maps`. 16 astrolog skeleton profiles created at `~/.hermes/astrolog/`. Tests in `tests/test_cli_commands.py`.
+All prior work done. 196 tests passing. Key completed items:
+- Stage 0: 7 correctness bugs fixed, ARC 15 fixed, CLI schema fixes
+- Stage 1: `maps wins`, `maps eval`, `maps goal --update`
+- Stage 2: ARC 23 `resistance_pattern`, ARC 24 `negative_interaction_pattern`
+- Stage 3: `environments/arc_cooldown.py`, per-arc suppression to `~/.maps_os_cooldown.json`
+- Stage 4: ARC 25 `exec_dysfunction` (cross-track)
+- Stage 6: `person_context()`, `person_birth_hint()`, `maps person` commands, 16 astrolog skeletons
+- TUI: `t` key → tulpa screen (multi-line stream), `T` → trend (key swap)
 
 ---
 
@@ -22,261 +25,220 @@ Read this whole document before starting. Do not start stage N+1 until stage N p
 ```
 environments/
   vent_parser.py      # Entry dataclass, parse_vent(), all _extract_*() functions
-  pattern_weaver.py   # Arc functions (ARC 1–22), weave()
-  nota_bridge.py      # nota action routing
+  pattern_weaver.py   # Arc functions (ARC 1–25), weave()
+  arc_cooldown.py     # Per-arc suppression, persists to ~/.maps_os_cooldown.json
   maps_os_config.py   # config loader for ~/.maps_os_config.yaml
   tui.py              # Rich TUI — dashboard, survival mode, input screens
   local_store.py      # SQLite offline queue
-  viz.py              # Rich-only visualizations: render_trend, render_viz
+  viz.py              # Rich visualizations: render_trend, render_viz
   date_resolver.py    # Relative date → ISO date conversion
 bin/
   maps                # CLI entry point — all top-level commands live here
 tests/
-  test_new_arcs.py    # Arcs 17–22 tests — follow this pattern for new arcs
+  test_new_arcs.py        # Arc tests — follow this pattern for new arc tests
+  test_arc_cooldown.py    # Cooldown suppression tests
+  test_cli_commands.py    # CLI integration tests
+  test_maps_os_config.py  # Config + person context tests
 ```
 
 **Schema format:** all garden entries use `TRACK: YYYY-MM-DD | field | field | note`.
 **Garden writes:** `garden remember '{entry}' --graph cassette` — always short graph ID.
-**Arc numbering:** next available is ARC 23. Document each arc in the function docstring.
+**Arc numbering:** next available is ARC 26.
 **File header on new files:** `# maps · cassette.help · MIT`
 **Non-TTY safety:** all new commands must work when stdout is not a terminal.
 
 ---
 
-## ✅ Stage 1 — COMPLETE (2026-04-10)
+## Stage 1 — New STATE tags
 
-### 1a. `maps wins [--week] [--month]`
+### 1a. Add `grounded` and `tender` to the STATE tag set
 
-Query garden for WIN entries, display grouped by week.
+**Rationale:**
+- `grounded` — anchored, present, not drifting. Active quality distinct from `stable` (neutral-flat). The "I actually feel okay and here" state.
+- `tender` — emotionally soft, open, post-connection warmth. The state after something meaningful — a good cry, a close conversation, vulnerability-as-positive. Not forward momentum (`thriving`). Still, soft, open.
 
-```bash
-maps wins           # all wins, most recent 30 days
-maps wins --week    # this week only
-maps wins --month   # this month only
+Both appear in maps's natural language already. Neither has a current tag home.
+
+**File: `environments/vent_parser.py`**
+
+Find `VALID_STATE_TAGS` (set or list). Add:
+```python
+"grounded",
+"tender",
 ```
 
-**Implementation:**
-- Query: `recall_resilient("WIN:", graph=args.graph, limit=50)`
-- Parse each entry: `WIN: date | note`
-- Group by ISO week (`date.isocalendar().week`)
-- Display with Rich: week header, bulleted win notes under it
-- No wins in range: `"no wins logged in this period."`
-- Non-TTY safe: plain text output, no Rich Panel required
+Find the STATE keyword extraction (the table or dict that maps phrases to STATE tags). Add entries:
+```python
+# grounded
+"feel grounded": "grounded",
+"feeling grounded": "grounded",
+"feel present": "grounded",
+"feeling present": "grounded",
+"feel anchored": "grounded",
+"actually okay": "grounded",
 
-**Tests:** ≥2 smoke tests (no garden required — test the grouping/parsing logic directly with mock entries)
-
-### 1b. `maps goal --update <phrase>`
-
-Update a matching GOAL's status to `in_progress`. The GOAL schema includes three states (`open` / `in_progress` / `done`) but `--update` was never implemented.
-
-```bash
-maps goal --update "learn swedish"
+# tender
+"feel tender": "tender",
+"feeling tender": "tender",
+"tender": "tender",       # single word match — only if it appears as a sentiment signal
+"emotionally open": "tender",
+"soft today": "tender",
+"feel soft": "tender",
 ```
 
-**Implementation:**
-- Same pattern as `maps goal --done`: query GOAL entries, find closest match to phrase
-- Write a new GOAL entry: same description + status `in_progress` + today's date
-- Print: `  ↻ goal updated: in_progress`
-- Garden is append-only: never modify existing entries
+**Note:** "tender" as a bare word may over-trigger. Implement as a word-boundary check — only if "tender" appears without a preceding object ("chicken tender", "tender offer" etc.). If the existing extraction logic doesn't support this level of specificity, add `"feel tender"` and `"feeling tender"` only and skip the bare word match.
 
-### 1c. `maps eval`
+**File: `environments/tui.py`**
 
-`maps eval` is referenced in the CLI docstring and AGENT_GUIDE.md quick reference but not implemented. Implement it.
-
-```bash
-maps eval           # cassette performance trend (last 30 days)
-maps eval --days 7  # shorter window
+Add to `STATE_COLORS`:
+```python
+"grounded": "#80cbc4",   # soft teal — present, earthy
+"tender":   "#f48fb1",   # dusty rose — soft, warm, open
 ```
 
-**Output:**
-- Intention met rate: count met/missed/partial INTENTION entries for the period, compute rate
-- STATE distribution: count of each STATE tag
-- Arc fire count: query arc history if available (or note "arc history not persisted yet")
-- Format: plain Rich table, non-TTY safe
+Add to `STATE_SYMBOLS`:
+```python
+"grounded": "◇",
+"tender":   "♡",
+```
 
-**Query:** `recall_resilient("INTENTION:", limit=60)` + `recall_resilient("STATE:", limit=30)`
+**File: `environments/maps_os_env.py`**
 
-**Tests:** ≥2 smoke tests for the parsing/rate computation logic
+Find any hard-coded valid STATE tag list and add `"grounded"` and `"tender"`.
+
+**File: `docs/AGENT_GUIDE.md`**
+
+In the STATE schema section, add to the tag disambiguation list:
+```
+- `grounded` = anchored and present — distinct from `stable` (grounded has active quality, not flat neutral)
+- `tender` = emotionally soft and open — distinct from `thriving` (tender is still, not momentum)
+```
+
+**Tests:** ≥2 tests in `tests/test_maps_os_env.py` or `tests/test_new_arcs.py`:
+- `grounded` and `tender` are accepted as valid STATE tags (no validation error)
+- STATE extraction from vent text: "feeling grounded today" → parses to STATE `grounded`
+- STATE extraction from vent text: "feel tender after that call" → parses to STATE `tender`
 
 ---
 
-## ✅ Stage 2 — COMPLETE (2026-04-10)
+## Stage 2 — TUI visual upgrades
 
-Add to `environments/pattern_weaver.py`. Add all new arcs to `weave()`.
+All changes in `environments/tui.py`. Run `python3 -m pytest tests/ -q` after this stage — no behavioral changes to parsing or arc logic, so all 196 tests should still pass. Visual changes are not testable via pytest; manual smoke test by running `python3 bin/maps` in a TTY.
 
-### ARC 23 — resistance_pattern (`_arc_resistance_pattern`)
+### 2a. Responsive centering
 
-- Input: entries of track `RESISTANCE`
-- Fires: 3+ RESISTANCE entries mentioning the same source phrase within 14 days
-- Matching: extract the source phrase (text before the ` | intensity` separator), lowercase, check if any two entries share a word ≥5 chars (rough dedup — not exact match required)
-- Message: `"you've been resisting {source} for {n} days. worth naming why?"`
-- Severity: `"insight"`
-- Surface: most-repeated source, oldest first for the date count
+**Current:** all content uses a fixed 2-space indent.
 
-Add to `weave()` signature: already receives `decision_entries` etc. RESISTANCE entries need to be added as a parameter if not already present.
+**Target:** banner and Rule dividers center to terminal width. Content panels stay left-aligned within a centered container.
 
-**Tests:** ≥3 tests in `tests/test_new_arcs.py`
-- fires on 3+ resistance entries with same-source word match
-- does not fire on 2 resistance entries
-- does not fire when sources are unrelated
-
-### ARC 24 — negative_interaction_pattern (`_arc_negative_interaction_pattern`)
-
-- Input: entries of track `PERSON`
-- Fires: 3+ PERSON entries for the same name with sentiment `negative` within 30 days
-- Name matching: extract name from `PERSON: date | name | context | sentiment` format (parts[1] after split by `|`)
-- Message: `"{name} is consistently showing up as draining. pattern worth noticing."`
-- Severity: `"insight"`
-- Surface one arc per most-frequent negative-sentiment person
-
-**Tests:** ≥3 tests
-- fires when same person has 3+ negative entries in 30 days
-- does not fire if only 2 negative entries
-- does not fire when sentiment is neutral even if person logged many times
-
----
-
-## ✅ Stage 3 — COMPLETE (2026-04-10)
-
-**Problem:** Insight arcs can fire on every `maps check` call as long as conditions persist. This creates alert fatigue. A manic spike that lasts 3 days will trigger `manic_spike` three sessions in a row.
-
-**Implementation:**
-
-Add `environments/arc_cooldown.py` (new file):
+Add a helper near the top of the module (after palette constants):
 
 ```python
-# maps · cassette.help · MIT
-"""
-arc_cooldown.py — Per-arc suppression tracking.
-
-Cooldown state is persisted to ~/.maps_os_cooldown.json.
-An arc that fires is suppressed for its cooldown window (in days).
-"""
+def _term_width() -> int:
+    """Terminal width, defaulting to 80 if not detectable."""
+    try:
+        return os.get_terminal_size().columns
+    except (OSError, AttributeError):
+        return 80
 ```
 
-Public API:
+Update `_draw_banner()` to center the ASCII logo lines and tagline relative to `_term_width()`. Use `" " * pad + line` where `pad = max(0, (_term_width() - len(plain_line)) // 2)`. The logo is already in `LOGO_LINES` — iterate and pad each line.
+
+Update `rule()` calls: `Rule` from Rich already fills terminal width, no change needed there. But any manually drawn separator lines should use the terminal width.
+
+Fallback: if terminal width < 80, skip the ASCII logo entirely and just show `"maps-os"` centered.
+
+### 2b. j/k navigation in list screens
+
+Add a simple paginator to screens that can produce more output than fits in a terminal.
+
+**Affected screens:** the output of `maps goal --list` (when called from TUI), wins output in `_screen_review`, person list if called from TUI.
+
+**Implementation:** within any screen that produces a list longer than `_term_width() // 2` lines, offer pagination:
+
 ```python
-def cooldown_path() -> Path:
-    """Returns ~/.maps_os_cooldown.json"""
-
-def load_cooldowns() -> dict:
-    """Load {arc_name: last_fired_iso_date}. Returns {} on missing file."""
-
-def save_cooldowns(cooldowns: dict) -> None:
-    """Persist cooldown state. Never raises."""
-
-def is_suppressed(arc_name: str, cooldowns: dict, cooldown_days: int) -> bool:
-    """Returns True if arc fired within cooldown_days."""
-
-def record_fired(arc_name: str, cooldowns: dict) -> dict:
-    """Returns updated cooldowns dict with arc_name set to today."""
+PAGE_SIZE = max(5, (_term_width() // 2) - 4)
 ```
 
-Default cooldown windows (in `arc_cooldown.py`):
+After rendering the current page:
+```
+  [dim]j next · k prev · ↩ back[/dim]
+```
+
+Read a key. `j` → increment page. `k` → decrement page. Any other key → return from screen.
+
+Keep it simple: if the list fits on one screen, don't show pagination at all.
+
+### 2c. Transient status during operations
+
+**Affected:** sync screen, tulpa parse step, any multi-step operation that currently prints static "loading..." lines.
+
+Replace static `rp(f"  [dim]parsing...[/dim]")` style lines with in-place updates using:
+
 ```python
-ARC_COOLDOWNS: dict[str, int] = {
-    "manic_spike": 1,         # alert — allow daily
-    "body_neglect": 1,
-    "isolation_creep": 2,
-    "state_dip_holding": 0,   # never suppress (survival trigger)
-    "spirit_rising": 3,
-    "post_manic_drop": 2,
-    "thriving_streak": 3,
-    "productivity_spiral": 2,
-    "catastrophizing_spike": 1,
-    "planning_hyperfocus": 1,
-    "substance_coping": 3,
-    "avoidance_language": 2,
-    "decision_pile": 3,
-    "trigger_pattern": 7,
-    "goal_stall": 7,
-    "resistance_pattern": 5,
-    "negative_interaction_pattern": 7,
-    # default for unlisted arcs: 0 (never suppress)
-}
+def _status(msg: str) -> None:
+    """Overwrite the current line with a status message."""
+    if sys.stdout.isatty():
+        sys.stdout.write(f"\r\033[2K  {msg}")
+        sys.stdout.flush()
+    else:
+        rp(f"  {msg}")
 ```
 
-**Integration in `weave()`:**
+Use this in:
+- `_screen_tulpa()`: during parse step
+- `_screen_sync()`: while flushing entries, update `_status(f"[dim]flushing {i}/{total}...[/dim]")`
+- After operation completes, call `rp("")` to move to next line (clears the transient line)
 
-Add optional `apply_cooldown: bool = True` parameter. When `True`:
-1. Load cooldowns at the start of `weave()`
-2. After running all detectors, filter result arcs: remove any arc whose name is in cooldowns and `is_suppressed(arc.name, cooldowns, ARC_COOLDOWNS.get(arc.name, 0))`
-3. For each arc that survives the filter, call `record_fired(arc.name, cooldowns)`
-4. Save updated cooldowns
+### 2f. Tulpa line counter
 
-Alert arcs with `severity == "survival"` are never suppressed regardless of cooldown state.
+In `_screen_tulpa()`, the current continuation prompt is `·`. Replace it with the current line count:
 
-**Tests:** ≥3 tests
-- arc not in cooldowns: fires
-- arc in cooldowns but cooldown expired: fires
-- arc in cooldowns within window: suppressed
-- survival arcs never suppressed
+```python
+prompt_sym = ">" if not lines else str(len(lines) + 1)
+```
 
----
+So the prompt sequence reads:
+```
+  >  first line
+  2  second line
+  3  /done
+```
 
-## ✅ Stage 4 — COMPLETE (2026-04-10)
-
-### ARC 25 — exec_dysfunction (`_arc_exec_dysfunction`)
-
-**Rationale:** The most debilitating ADHD/dysregulation pattern is when resistance + goal stall + low state co-occur. No single arc catches this combination. It needs its own detector.
-
-- Input: `state_entries`, `resistance_entries`, `goal_entries`
-- Fires when ALL of:
-  - Current STATE in (`depleted`, `flooded`, `manic`)
-  - ≥1 RESISTANCE entry with intensity `high` in last 7 days
-  - ≥1 GOAL with status `open` older than 14 days
-- Message: `"resistance is high and {goal} has been stalled. exec dysfunction pattern. what's the one thing that doesn't require starting?"`
-- Severity: `"insight"`
-- Surface the oldest stalled goal in the message
-- Does not fire in survival mode (state == `grieving` or `surviving` counts as survival, not exec dysfunction)
-
-Add to `weave()` after existing insight detectors.
-
-**Tests:** ≥4 tests
-- all three conditions met → fires
-- state is stable (not depleted/flooded/manic) → does not fire
-- resistance is low intensity → does not fire
-- goal is recent (< 14 days) → does not fire
+The `>` marks entry. Numbers mark continuation. `/done` to finish.
 
 ---
 
-## Stage 4e — Tests
+## Out of scope for Phase 2.8
 
-After each stage, run full test suite. Confirm:
-- 174 originally passing tests still pass
-- New tests added for each stage as noted above
-- `python -m pytest tests/ -q` exits 0
+**Priority 4.7 architecture block** — deferred. Do not implement:
+- Shared entry codec / schema parser
+- Canonical alias resolution (`brennan` / `b` formal dedup)
+- Real date-window filtering (replace `limit=N` with true date cutoffs)
+- Arc evidence + persisted arc history
+- Safe garden subprocess wrapper (argv-based)
+- Config schema v2 with structured birth/location fields
+- `maps doctor` — system health check command
+- `maps parse --dry-run`
 
----
+**TUI upgrades 10d and 10e** — marked [SPEC], not [READY]. Do not implement:
+- Dashboard two-column layout (10d) — layout math not fully specced
+- STATE-colored header Rule (10e) — interaction with survival mode not specced
 
-## Stage 5 — Smoke tests for existing visualization (✅ partially done)
-
-`tests/test_phase26_fixes.py` includes one viz smoke test (`test_render_viz_body_panel_tracks_presence_per_day`). If additional coverage is needed:
-
-**`render_trend()`** — call with ≥5 STATE dict entries spanning 3 different tags. Assert result is not None and contains `█`.
-
-Use synthetic entry dicts: `{"content": "STATE: 2026-04-01 | thriving | test"}`.
-
----
-
-## Out of scope for Phase 2.7
-
-**nota task deduplication** — explicitly deferred. Do not add deduplication logic to `nota_bridge.py`.
-
-**Priority 4.7 architecture items** — deferred to Phase 2.8. Do not implement: shared entry codec, canonical alias resolution, real date-window filtering, arc evidence persistence, safe garden subprocess wrapper, `maps doctor`, `maps parse --dry-run`, config schema v2. The current Stages 1-4 are clean feature additions that don't require architecture refactors first.
+**nota deduplication** — still explicitly deferred.
 
 ---
 
 ## Rules for the implementing agent
 
-- Run `python -m pytest tests/ -q` after each stage. All existing green tests must stay green.
+- Run `python -m pytest tests/ -q` after each stage. All 196 green tests must stay green.
 - Do not modify the garden write format for existing entry types.
 - All new `_extract_*` functions: return `[]` on no match, never raise.
 - All new Arc functions: return `None` or `[]` on insufficient data, never raise.
 - Config (`~/.maps_os_config.yaml`) is always optional — missing file = degrades gracefully.
-- nota routing is always wrapped in try/except and gated on `nota_available()`.
 - Cooldown file missing or malformed: degrade gracefully, do not raise.
 - No hardcoded names, people, or personal data anywhere in source.
+- TUI changes: must remain non-TTY safe. All new `sys.stdout.write()` calls must be gated on `sys.stdout.isatty()`.
 
 ---
 

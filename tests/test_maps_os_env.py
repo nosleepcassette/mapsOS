@@ -89,6 +89,14 @@ class TestVentParser:
         result = parse_vent("feeling really good, things are clicking and in it")
         assert result[0].category == "thriving"
 
+    def test_grounded_detection(self):
+        result = parse_vent("feeling grounded today, actually okay and present")
+        assert result[0].category == "grounded"
+
+    def test_tender_detection(self):
+        result = parse_vent("feel tender after that call, emotionally open")
+        assert result[0].category == "tender"
+
     def test_stable_fallback(self):
         result = parse_vent("okay, fine, neutral, nothing happening")
         assert result[0].category == "stable"
@@ -571,7 +579,18 @@ class TestMapsOSReward:
 
     def test_valid_state_tags_recognized(self):
         s = SCENARIOS[0]
-        for tag in ["surviving", "stable", "thriving", "grieving", "manic", "depleted", "flooded", "clear"]:
+        for tag in [
+            "surviving",
+            "stable",
+            "grounded",
+            "tender",
+            "thriving",
+            "grieving",
+            "manic",
+            "depleted",
+            "flooded",
+            "clear",
+        ]:
             r = compute_maps_os_reward(
                 self._traj(
                     tools=["remember"],

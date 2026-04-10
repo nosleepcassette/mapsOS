@@ -21,7 +21,9 @@ The primary axis. One tag per session — the dominant emotional/psychological r
 |-----|---------|
 | `surviving` | minimal function, getting through |
 | `stable` | neutral baseline, nothing wrong, nothing lit |
+| `grounded` | anchored, present, not drifting — active quality distinct from `stable` |
 | `thriving` | genuine forward momentum, things clicking |
+| `tender` | emotionally soft, open, post-connection warmth — still, not momentum |
 | `grieving` | loss-adjacent (person, phase, possibility) |
 | `manic` | elevated, fast, possibly unsustainable |
 | `depleted` | tank empty, may still be functional |
@@ -126,20 +128,23 @@ Requires `rich`. No Textual dependency — raw termios + Rich.
 
 Warm amber palette. STATE-specific colors. Dashboard, survival, vent, flash, state, body, mind, spirit, intention, review, help, and sync screens.
 
-| Key | Action                  |
-|-----|-------------------------|
-| `v` | vent                    |
-| `f` | flash                   |
-| `s` | state                   |
-| `b` | body                    |
-| `m` | mind                    |
-| `S` | spirit                  |
-| `i` | intention               |
-| `r` | review                  |
-| `c` | refresh / pattern check |
-| `y` | sync local store        |
-| `?` / `h` | help              |
-| `q` | quit                    |
+| Key        | Action                            |
+|------------|-----------------------------------|
+| `v`        | vent                              |
+| `t`        | tulpa (multi-line stream capture) |
+| `f`        | flash                             |
+| `s`        | state                             |
+| `b`        | body                              |
+| `m`        | mind                              |
+| `S`        | spirit                            |
+| `i`        | intention                         |
+| `r`        | review                            |
+| `c`        | refresh / pattern check           |
+| `y`        | sync local store                  |
+| `T`        | trend chart                       |
+| `V`        | viz dashboard                     |
+| `?` / `h`  | help                              |
+| `q`        | quit                              |
 
 ---
 
@@ -158,24 +163,24 @@ After every vent and at session start, the pattern weaver runs across recent ent
 
 ### Insight arcs (all that apply)
 
-| Arc | Trigger | Cooldown |
-|-----|---------|---------|
-| `spirit_rising` | Connection rising while state is low | 3 days |
-| `post_manic_drop` | Was manic, now depleted/stable | 2 days |
-| `thriving_streak` | 3 consecutive thriving | 3 days |
-| `productivity_spiral` | Manic/depleted + work language + no spirit tracked | 2 days |
-| `catastrophizing_spike` | Catastrophizing phrases in vent notes | 1 day |
-| `planning_hyperfocus` | Planning language + high mind + no intentions today | 1 day |
-| `substance_coping` | Substances logged during heavy state | 3 days |
-| `avoidance_language` | 2+ avoidance phrases in recent vents | 2 days |
-| `habit_candidate` | Intention logged 5+ times at ≥60% met rate | — |
-| `decision_pile` | 3+ unresolved DECISION entries in 7 days | 3 days |
-| `trigger_pattern` | 3+ TRIGGER entries from same source in 30 days | 7 days |
-| `goal_stall` | GOAL open >14 days | 7 days |
-| `resistance_pattern` | 3+ RESISTANCE entries, same source, 14 days | 5 days |
-| `negative_interaction_pattern` | 3+ negative PERSON entries, same person, 30 days | 7 days |
-| `exec_dysfunction` | High RESISTANCE + stalled GOAL + low/dysregulated STATE simultaneously | — |
-| `intrusive_loop` | Same topic in 3+ flash entries | — |
+| Arc                          | Trigger                                                   | Cooldown |
+|------------------------------|-----------------------------------------------------------|----------|
+| `spirit_rising`              | Connection rising while state is low                      | 3 days   |
+| `post_manic_drop`            | Was manic, now depleted/stable                            | 2 days   |
+| `thriving_streak`            | 3 consecutive thriving                                    | 3 days   |
+| `productivity_spiral`        | Manic/depleted + work language + no spirit tracked        | 2 days   |
+| `catastrophizing_spike`      | Catastrophizing phrases in vent notes                     | 1 day    |
+| `planning_hyperfocus`        | Planning language + high mind + no intentions today       | 1 day    |
+| `substance_coping`           | Substances logged during heavy state                      | 3 days   |
+| `avoidance_language`         | 2+ avoidance phrases in recent vents                      | 2 days   |
+| `habit_candidate`            | Intention logged 5+ times at ≥60% met rate                | —        |
+| `decision_pile`              | 3+ unresolved DECISION entries in 7 days                  | 3 days   |
+| `trigger_pattern`            | 3+ TRIGGER entries from same source in 30 days            | 7 days   |
+| `goal_stall`                 | GOAL open >14 days                                        | 7 days   |
+| `resistance_pattern`         | 3+ RESISTANCE entries, same source, 14 days               | 5 days   |
+| `negative_interaction_pattern` | 3+ negative PERSON entries, same person, 30 days        | 7 days   |
+| `exec_dysfunction`           | High resistance + stalled goal + dysregulated STATE       | —        |
+| `intrusive_loop`             | Same topic in 3+ flash entries                            | —        |
 
 ### Behavioral arcs (response calibration, not code)
 

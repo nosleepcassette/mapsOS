@@ -379,6 +379,112 @@ maps speak --5s   # short clip
 
 ---
 
+## Priority 10 — TUI Visual Upgrade [SPEC]
+
+The current TUI works well but uses a fixed left-margin layout. tsundoku (same aesthetic foundation — amber palette, raw termios + Rich, same author) has several UX patterns worth porting.
+
+**Goals:** make the TUI feel as polished as tsundoku visually while preserving the functional layout. No dependency additions. Rich only.
+
+---
+
+### 10a. Responsive centering [READY]
+
+**Current state:** all content uses a fixed 2-space indent (`  text`).
+
+**Target:** banner and section headers center to terminal width, like tsundoku's `Display.centered()`. Content columns stay left-aligned but adapt if terminal is narrow (< 80 cols: drop sidebar column, stack panels vertically).
+
+**Implementation:**
+- Add `_terminal_width() -> int` helper (wraps `os.get_terminal_size().columns`, defaults to 80)
+- Center the ASCII logo relative to terminal width
+- Center Rule() dividers
+- Content panels: left-aligned within a centered container
+
+---
+
+### 10b. j/k navigation in list screens [READY]
+
+**Affected screens:** goal list, wins screen, person --list, review.
+
+**Target:** vim-style `j`/`k` scroll when list exceeds terminal height. Paginator pattern from tsundoku (`Paginator` dataclass, `current_page`, `page_size`).
+
+**Implementation:**
+- `_paginate(items, page_size)` helper returning current page slice
+- `j`/`k` within a screen change page
+- Footer shows `[j/k] scroll · [↩] back`
+
+---
+
+### 10c. Transient status lines [READY]
+
+**Current state:** operations (sync, parsing) print static lines.
+
+**Target:** during multi-step operations, overwrite a single status line in place (`\r\033[2K`). Pattern from tsundoku's `transient_status()`.
+
+**Affected:** sync screen (shows "flushing N entries..." updating count), tulpa parsing (shows line count as typing continues).
+
+---
+
+### 10d. Dashboard column layout [SPEC]
+
+**Current state:** dashboard is a single-column vertical list of panels.
+
+**Target (≥100 col terminals):** two-column layout.
+- Left column: STATE + BODY panels
+- Right column: arcs + INTENTION panels
+
+**Implementation:** `rich.columns.Columns` or manual width calculation. Falls back to current single-column layout when terminal is < 100 cols.
+
+---
+
+### 10e. STATE-colored header bar [SPEC]
+
+**Current state:** banner is always amber regardless of state.
+
+**Target:** dashboard header rule line color reflects current STATE (`STATE_COLORS[current_tag]`). Subtle — the color appears only in the rule, not the logo. Gives immediate visual feedback of current state on open.
+
+---
+
+### 10f. Tulpa line counter [READY]
+
+During tulpa capture, show a live line count in the prompt prefix that updates as lines are typed:
+
+```
+  >  first line here
+  2  second line here
+  3  /done
+```
+
+Line number replaces the `·` continuation prompt. No additional dependencies needed — just track `len(lines)` before showing the prompt.
+
+---
+
+### 10g. Positive STATE tags [SPEC]
+
+**Current distribution:** 2 positive (`thriving`, `clear`), 1 neutral (`stable`), 1 ambiguous (`manic`), 4 negative (`surviving`, `grieving`, `depleted`, `flooded`).
+
+**Proposed additions:**
+
+| Tag | Meaning | Distinct from |
+|-----|---------|--------------|
+| `grounded` | anchored, present, not drifting | `stable` (neutral flat) — grounded has active quality |
+| `tender` | emotionally soft, open, post-connection warmth | `thriving` (momentum) — tender is still, not moving forward |
+
+**Why these specifically:**
+- maps already uses "tender" in session notes ("post-tender clarity" appears in vent text)
+- `grounded` fills the gap between flat-neutral `stable` and active-forward `thriving`
+- Both are genuinely distinct experiential states with no current good tag home
+- Adding 2 brings balance to 4 positive/2 neutral+ambiguous/4 negative without tag proliferation
+
+**Implementation scope if approved:**
+- Add to `VALID_STATE_TAGS` in `vent_parser.py`
+- Add to `STATE_COLORS` and `STATE_SYMBOLS` in `tui.py`
+- Add to `AGENT_GUIDE.md` tag disambiguation section
+- Add to `SKILL.md` STATE section
+- Add to RL env valid tag list in `maps_os_env.py`
+- Tests: update any hard-coded valid-tag lists in test files
+
+---
+
 ## Notes for implementing agents
 
 - All new entry types (PERSON, WIN, DECISION, RESISTANCE, TRIGGER, RETROACTIVE, EVENT, DEADLINE) follow the same `TRACK: date | field | field | note` format

@@ -32,6 +32,8 @@ VALID_STATE_TAGS = frozenset(
     [
         "surviving",
         "stable",
+        "grounded",
+        "tender",
         "thriving",
         "grieving",
         "manic",
@@ -144,6 +146,29 @@ _STATE_SIGNALS: list[tuple[list[str], str]] = [
             "strangely calm",
         ],
         "clear",
+    ),
+    # Grounded — present, anchored, actively okay
+    (
+        [
+            "feel grounded",
+            "feeling grounded",
+            "feel present",
+            "feeling present",
+            "feel anchored",
+            "actually okay",
+        ],
+        "grounded",
+    ),
+    # Tender — emotionally soft/open, not the same as thriving
+    (
+        [
+            "feel tender",
+            "feeling tender",
+            "emotionally open",
+            "soft today",
+            "feel soft",
+        ],
+        "tender",
     ),
     # Thriving — genuine forward momentum
     (

@@ -9,6 +9,7 @@ Matches the tsundoku/augury aesthetic: warm amber palette, vim keys, raw input.
 from __future__ import annotations
 
 import os
+import re
 import sys
 import time
 import select
@@ -62,6 +63,8 @@ STATE_COLORS = {
     "flooded": "#ffb74d",  # amber-orange
     "manic": "#ce93d8",  # soft violet
     "stable": "#e0e0e0",  # near-white neutral
+    "grounded": "#80cbc4",  # soft teal
+    "tender": "#f48fb1",  # dusty rose
     "thriving": "#a5d6a7",  # soft green
     "clear": "#80deea",  # clear cyan
 }
@@ -73,6 +76,8 @@ STATE_SYMBOLS = {
     "flooded": "≋",
     "manic": "↑",
     "stable": "—",
+    "grounded": "◇",
+    "tender": "♡",
     "thriving": "✦",
     "clear": "◎",
 }
@@ -114,11 +119,16 @@ def rp(*args, **kwargs):
         print(text, **{k: v for k, v in kwargs.items() if k in ("end", "file")})
 
 
-def width() -> int:
+def _term_width() -> int:
+    """Terminal width, defaulting to 80 if not detectable."""
     try:
         return os.get_terminal_size().columns
-    except OSError:
+    except (OSError, AttributeError):
         return 80
+
+
+def width() -> int:
+    return _term_width()
 
 
 def height() -> int:
@@ -130,6 +140,29 @@ def height() -> int:
 
 def clr():
     os.system("clear")
+
+
+def _content_prefix() -> str:
+    container_width = min(88, max(40, _term_width() - 8))
+    return " " * max(0, (_term_width() - container_width) // 2)
+
+
+def _content(text: str = "", end: str = "\n"):
+    prefix = _content_prefix()
+    if text:
+        rp(f"{prefix}{text}", end=end)
+    else:
+        rp("", end=end)
+
+
+def _status(msg: str) -> None:
+    """Overwrite the current line with a status message."""
+    if sys.stdout.isatty():
+        plain = re.sub(r"\[/?[^\]]+\]", "", msg)
+        sys.stdout.write(f"\r\033[2K{_content_prefix()}  {plain}")
+        sys.stdout.flush()
+    else:
+        _content(msg)
 
 
 def rule(title: str = "", color: str = AMBER_DIM):
@@ -302,23 +335,86 @@ def _load_context() -> dict:
 
 
 def _draw_banner():
-    w = width()
-    logo = LOGO_LINES if w >= 64 else ["  maps · os"]
+    w = _term_width()
+    logo = LOGO_LINES if w >= 80 else ["maps-os"]
     color = AMBER
 
-    # Center the whole block as a unit — not each line independently.
-    # Per-line centering makes the short trailing lines (like "dP") drift
-    # to the wrong column.
-    max_logo_w = max(len(line) for line in logo)
-    left_pad = max(0, (w - max_logo_w) // 2)
+    # Center the block as a whole — preserve internal whitespace, shift by constant offset.
+    # DO NOT strip individual lines: the leading spaces inside LOGO_LINES are structural.
+    max_logo_width = max(len(line) for line in logo)
+    logo_pad = " " * max(0, (w - max_logo_width) // 2)
 
     for line in logo:
-        rp(f"{' ' * left_pad}[bold {color}]{line}[/bold {color}]")
+        rp(f"{logo_pad}[bold {color}]{line}[/bold {color}]")
 
     rp("")
-    tag_pad = max(0, (w - len(TAGLINE)) // 2)
-    rp(f"{' ' * tag_pad}[{PALE}]{TAGLINE}[/{PALE}]")
+    tag_pad = " " * max(0, (w - len(TAGLINE)) // 2)
+    rp(f"{tag_pad}[{PALE}]{TAGLINE}[/{PALE}]")
     rp("")
+
+
+# ---------------------------------------------------------------------------
+# Hotkey bar (shared by dashboard and other screens)
+# ---------------------------------------------------------------------------
+
+_HOTKEYS_ROW1 = [
+    ("v", "vent"),
+    ("t", "tulpa"),
+    ("f", "flash"),
+    ("s", "state"),
+    ("b", "body"),
+    ("m", "mind"),
+    ("S", "spirit"),
+]
+_HOTKEYS_ROW2 = [
+    ("i", "intention"),
+    ("r", "review"),
+    ("T", "trend"),
+    ("V", "viz"),
+    ("y", "sync"),
+    ("?", "help"),
+    ("q", "quit"),
+]
+
+
+def _hotkey_row_str(pairs: list[tuple[str, str]]) -> tuple[str, str]:
+    """Return (plain_text, rich_markup) for a row of hotkey pairs.
+
+    The key letter is embedded at its natural position in the label:
+      ("y", "sync")  → s[y]nc
+      ("t", "tulpa") → [t]ulpa
+      ("?", "help")  → [?]help  (key not in label — prefix fallback)
+    """
+    sep = "  "
+    plain_parts: list[str] = []
+    rich_parts: list[str] = []
+
+    for key, label in pairs:
+        idx = label.lower().find(key.lower())
+        if idx >= 0:
+            before, after = label[:idx], label[idx + 1:]
+            plain_parts.append(f"{before}[{key}]{after}")
+            rich_before = f"[dim]{before}[/dim]" if before else ""
+            rich_after = f"[dim]{after}[/dim]" if after else ""
+            rich_parts.append(
+                f"{rich_before}[{AMBER_DIM}]\\[{key}][/{AMBER_DIM}]{rich_after}"
+            )
+        else:
+            # Key char not in label — prefix style
+            plain_parts.append(f"[{key}]{label}")
+            rich_parts.append(
+                f"[{AMBER_DIM}]\\[{key}][/{AMBER_DIM}][dim]{label}[/dim]"
+            )
+
+    return sep.join(plain_parts), sep.join(rich_parts)
+
+
+def _draw_hotkey_bar():
+    w = _term_width()
+    for pairs in (_HOTKEYS_ROW1, _HOTKEYS_ROW2):
+        plain, rich = _hotkey_row_str(pairs)
+        pad = " " * max(0, (w - len(plain)) // 2)
+        rp(f"{pad}{rich}")
 
 
 # ---------------------------------------------------------------------------
@@ -341,9 +437,9 @@ def _draw_dashboard(ctx: dict):
     # STATE row
     if ctx["states"]:
         note = _extract_note(ctx["states"][-1])
-        rp(f"  [{color}]{sym}  {state:<12}[/{color}]  [dim]{note[:60]}[/dim]")
+        _content(f"[{color}]{sym}  {state:<12}[/{color}]  [dim]{note[:60]}[/dim]")
     else:
-        rp(f"  [dim]no state logged  —  vent or drop a word[/dim]")
+        _content("[dim]no state logged  —  vent or drop a word[/dim]")
 
     rp("")
 
@@ -354,7 +450,7 @@ def _draw_dashboard(ctx: dict):
 
     def _track_row(label: str, entries: list[dict]):
         if not entries:
-            rp(f"  [dim]{label:<8}  (nothing today)[/dim]")
+            _content(f"[dim]{label:<8}  (nothing today)[/dim]")
             return
         parts = []
         for e in entries[:3]:
@@ -367,7 +463,7 @@ def _draw_dashboard(ctx: dict):
                 cat = segs[1]
                 status = segs[2]
             parts.append(f"[{PALE}]{cat}[/{PALE}]: [dim]{status}[/dim]")
-        rp(f"  [{AMBER_DIM}]{label:<8}[/{AMBER_DIM}]  " + "  ·  ".join(parts))
+        _content(f"[{AMBER_DIM}]{label:<8}[/{AMBER_DIM}]  " + "  ·  ".join(parts))
 
     _track_row("BODY", body_today)
     _track_row("MIND", mind_today)
@@ -384,7 +480,7 @@ def _draw_dashboard(ctx: dict):
             name = segs[0] if segs else ""
             status = segs[1].lower() if len(segs) > 1 else "unknown"
             sym_markup, label = INTENTION_SYMBOLS.get(status, ("[dim]?[/dim]", status))
-            rp(f"  {sym_markup}  [{PALE}]{name:<14}[/{PALE}]  [dim]{label}[/dim]")
+            _content(f"{sym_markup}  [{PALE}]{name:<14}[/{PALE}]  [dim]{label}[/dim]")
 
     # ── patterns ───────────────────────────────────────────────────────────
     alerts = [a for a in ctx["arcs"] if a.severity == "alert"]
@@ -394,35 +490,24 @@ def _draw_dashboard(ctx: dict):
         rp("")
         rule("  patterns  ")
         if alerts:
-            rp(
-                f"  [bold {STATE_COLORS['manic']}]![/bold {STATE_COLORS['manic']}]  {alerts[0].message}"
+            _content(
+                f"[bold {STATE_COLORS['manic']}]![/bold {STATE_COLORS['manic']}]  {alerts[0].message}"
             )
         elif insights:
-            rp(f"  [{AMBER}]·[/{AMBER}]  {insights[0].message}")
+            _content(f"[{AMBER}]·[/{AMBER}]  {insights[0].message}")
 
     # ── pending local store ────────────────────────────────────────────────
     if ctx["pending"] > 0:
         rp("")
-        rp(
-            f"  [dim]⚡ {ctx['pending']} entries in local store  (garden may be down)  [/dim]"
+        _content(
+            f"[dim]⚡ {ctx['pending']} entries in local store  (garden may be down)  [/dim]"
             f"[{AMBER_DIM}]\\[y] sync[/{AMBER_DIM}]"
         )
 
     # ── keys ───────────────────────────────────────────────────────────────
     rp("")
     rule()
-    rp(
-        f"  [{AMBER_DIM}]\\[v][/{AMBER_DIM}]ent  "
-        f"[{AMBER_DIM}]\\[f][/{AMBER_DIM}]lash  "
-        f"[{AMBER_DIM}]\\[s][/{AMBER_DIM}]tate  "
-        f"[{AMBER_DIM}]\\[b][/{AMBER_DIM}]ody  "
-        f"[{AMBER_DIM}]\\[m][/{AMBER_DIM}]ind  "
-        f"[{AMBER_DIM}]\\[S][/{AMBER_DIM}]pirit  "
-        f"[{AMBER_DIM}]\\[i][/{AMBER_DIM}]ntention  "
-        f"[{AMBER_DIM}]\\[r][/{AMBER_DIM}]eview  "
-        f"[{AMBER_DIM}]\\[?][/{AMBER_DIM}]help  "
-        f"[{AMBER_DIM}]\\[q][/{AMBER_DIM}]uit"
-    )
+    _draw_hotkey_bar()
     rp("")
 
 
@@ -433,7 +518,7 @@ def _draw_dashboard(ctx: dict):
 
 def _draw_survival(ctx: dict):
     clr()
-    w = width()
+    w = _term_width()
     sv = ctx["survival"]
     days_str = f"day {sv.days_in_mode}" if sv.days_in_mode > 1 else ""
 
@@ -474,8 +559,8 @@ def _draw_survival(ctx: dict):
 
     rp("")
     rp("")
-    rp(
-        f"  [{AMBER_DIM}]\\[l][/{AMBER_DIM}] log state  "
+    _content(
+        f"[{AMBER_DIM}]\\[l][/{AMBER_DIM}] log state  "
         f"[{AMBER_DIM}]\\[v][/{AMBER_DIM}] vent  "
         f"[{AMBER_DIM}]\\[q][/{AMBER_DIM}] quit"
     )
@@ -493,10 +578,10 @@ def _screen_vent(ctx: dict) -> bool:
     _draw_banner()
     rule("  vent  ")
     rp("")
-    rp(f"  [{PALE}]just type. parsing happens after.[/{PALE}]")
-    rp(f"  [dim]empty line to cancel[/dim]")
+    _content(f"[{PALE}]just type. parsing happens after.[/{PALE}]")
+    _content("[dim]empty line to cancel[/dim]")
     rp("")
-    rp(f"  [bold {AMBER}]>[/bold {AMBER}] ", end="")
+    _content(f"[bold {AMBER}]>[/bold {AMBER}] ", end="")
 
     text = _read_line()
     if not text:
@@ -504,7 +589,7 @@ def _screen_vent(ctx: dict) -> bool:
 
     rp("")
     rule()
-    rp(f"  [dim]parsing...[/dim]")
+    _status("[dim]parsing...[/dim]")
 
     from environments.vent_parser import parse_vent, format_garden_commands
     from environments.local_store import remember as resilient_remember
@@ -526,13 +611,13 @@ def _screen_vent(ctx: dict) -> bool:
         _, dest = resilient_remember(content)
         color = _state_color(e.category or "stable") if e.track == "STATE" else PALE
         dest_note = " [dim](local)[/dim]" if dest == "local" else ""
-        rp(
-            f"  [{color}]{e.track}[/{color}]  [dim]{e.category} | {e.status or ''} | {(e.note or '')[:40]}[/dim]{dest_note}"
+        _content(
+            f"[{color}]{e.track}[/{color}]  [dim]{e.category} | {e.status or ''} | {(e.note or '')[:40]}[/dim]{dest_note}"
         )
         logged.append(e)
 
     if not logged:
-        rp(f"  [dim](nothing parsed)[/dim]")
+        _content("[dim](nothing parsed)[/dim]")
         rp("")
         _pause()
         return False
@@ -552,8 +637,8 @@ def _screen_vent(ctx: dict) -> bool:
     if alerts:
         rp("")
         rule()
-        rp(
-            f"  [bold {STATE_COLORS['manic']}]→[/bold {STATE_COLORS['manic']}]  {alerts[0].message}"
+        _content(
+            f"[bold {STATE_COLORS['manic']}]→[/bold {STATE_COLORS['manic']}]  {alerts[0].message}"
         )
 
     rp("")
@@ -567,9 +652,9 @@ def _screen_flash(ctx: dict) -> bool:
     _draw_banner()
     rule("  flash  ")
     rp("")
-    rp(f"  [{PALE}]just a word or phrase. no structure needed.[/{PALE}]")
+    _content(f"[{PALE}]just a word or phrase. no structure needed.[/{PALE}]")
     rp("")
-    rp(f"  [bold {AMBER}]·[/bold {AMBER}] ", end="")
+    _content(f"[bold {AMBER}]·[/bold {AMBER}] ", end="")
 
     text = _read_line()
     if not text:
@@ -581,7 +666,7 @@ def _screen_flash(ctx: dict) -> bool:
     _, dest = resilient_remember(content)
     dest_note = " (saved locally)" if dest == "local" else ""
     rp("")
-    rp(f"  [{PALE}]· {text.strip()}[/{PALE}]  [dim]captured{dest_note}[/dim]")
+    _content(f"[{PALE}]· {text.strip()}[/{PALE}]  [dim]captured{dest_note}[/dim]")
     rp("")
     _pause(0.8)
     return True
@@ -673,10 +758,10 @@ def _screen_generic_track(
     rp("")
 
     for i, cat in enumerate(categories, 1):
-        rp(f"  [{AMBER_DIM}]{i}[/{AMBER_DIM}]  [{PALE}]{cat}[/{PALE}]")
+        _content(f"[{AMBER_DIM}]{i}[/{AMBER_DIM}]  [{PALE}]{cat}[/{PALE}]")
 
     rp("")
-    rp(f"  [dim]category:[/dim] ", end="")
+    _content("[dim]category:[/dim] ", end="")
     cat_choice = _read_line()
     if not cat_choice:
         return False
@@ -694,15 +779,15 @@ def _screen_generic_track(
     if not category:
         return False
 
-    rp(
-        f"  [dim]status  (e.g. none, poor, low, present, high, scattered):[/dim] ",
+    _content(
+        "[dim]status  (e.g. none, poor, low, present, high, scattered):[/dim] ",
         end="",
     )
     status = _read_line()
     if not status:
         return False
 
-    rp(f"  [dim]note  (optional):[/dim] ", end="")
+    _content("[dim]note  (optional):[/dim] ", end="")
     note = _read_line()
 
     content = f"{track}: {ctx['today']} | {category} | {status} | {note}"
@@ -711,8 +796,8 @@ def _screen_generic_track(
     _, dest = resilient_remember(content)
     dest_note = " (local)" if dest == "local" else ""
     rp("")
-    rp(
-        f"  [{PALE}]{track}: {category} | {status}[/{PALE}]  [dim]logged{dest_note}[/dim]"
+    _content(
+        f"[{PALE}]{track}: {category} | {status}[/{PALE}]  [dim]logged{dest_note}[/dim]"
     )
     rp("")
     _pause(0.6)
@@ -724,17 +809,17 @@ def _screen_intention(ctx: dict) -> bool:
     _draw_banner()
     rule("  intention  ")
     rp("")
-    rp(f"  [{PALE}]what intention?[/{PALE}] ", end="")
+    _content(f"[{PALE}]what intention?[/{PALE}] ", end="")
     name = _read_line()
     if not name:
         return False
 
     rp("")
-    rp(f"  [{AMBER_DIM}]1[/{AMBER_DIM}]  [green]✓  met[/green]")
-    rp(f"  [{AMBER_DIM}]2[/{AMBER_DIM}]  [yellow]~  partial[/yellow]")
-    rp(f"  [{AMBER_DIM}]3[/{AMBER_DIM}]  [dim]·  missed[/dim]")
+    _content(f"[{AMBER_DIM}]1[/{AMBER_DIM}]  [green]✓  met[/green]")
+    _content(f"[{AMBER_DIM}]2[/{AMBER_DIM}]  [yellow]~  partial[/yellow]")
+    _content(f"[{AMBER_DIM}]3[/{AMBER_DIM}]  [dim]·  missed[/dim]")
     rp("")
-    rp(f"  [dim]status:[/dim] ", end="")
+    _content("[dim]status:[/dim] ", end="")
     s = _read_line()
 
     status_map = {
@@ -752,7 +837,7 @@ def _screen_intention(ctx: dict) -> bool:
     if not status:
         return False
 
-    rp(f"  [dim]note  (optional):[/dim] ", end="")
+    _content("[dim]note  (optional):[/dim] ", end="")
     note = _read_line()
 
     content = f"INTENTION: {name.lower()} | {status} | {ctx['today']} | {note}"
@@ -762,12 +847,61 @@ def _screen_intention(ctx: dict) -> bool:
     sym_markup, _ = INTENTION_SYMBOLS.get(status, ("[dim]?[/dim]", ""))
     dest_note = " (local)" if dest == "local" else ""
     rp("")
-    rp(
-        f"  {sym_markup}  [{PALE}]{name}  {status}[/{PALE}]  [dim]logged{dest_note}[/dim]"
+    _content(
+        f"{sym_markup}  [{PALE}]{name}  {status}[/{PALE}]  [dim]logged{dest_note}[/dim]"
     )
     rp("")
     _pause(0.6)
     return True
+
+
+# ---------------------------------------------------------------------------
+# Paged list helper
+# ---------------------------------------------------------------------------
+
+
+def _page_size() -> int:
+    return max(5, (_term_width() // 2) - 4)
+
+
+def _paged_screen(title: str, lines: list[str]):
+    if not lines:
+        return
+
+    page_size = _page_size()
+    if len(lines) <= page_size:
+        for line in lines:
+            _content(line)
+        rp("")
+        rule()
+        _content("[dim]↩ back[/dim]")
+        _read_key()
+        return
+
+    page = 0
+    total_pages = (len(lines) + page_size - 1) // page_size
+    while True:
+        clr()
+        _draw_banner()
+        rule(title)
+        rp("")
+
+        start = page * page_size
+        end = start + page_size
+        for line in lines[start:end]:
+            _content(line)
+
+        rp("")
+        rule()
+        _content(f"[dim]page {page + 1}/{total_pages}  ·  j next · k prev · ↩ back[/dim]")
+        key = _read_key()
+        if key == "j" and page < total_pages - 1:
+            page += 1
+            continue
+        if key == "k" and page > 0:
+            page -= 1
+            continue
+        break
 
 
 # ---------------------------------------------------------------------------
@@ -785,9 +919,10 @@ def _screen_review(ctx: dict):
     body = _recall("BODY:", 14)
     spirit = _recall("SPIRIT:", 14)
     intentions = _recall("INTENTION:", 14)
+    wins = _recall("WIN:", 14)
 
     if not states:
-        rp(f"  [dim]no state data to review[/dim]")
+        _content("[dim]no state data to review[/dim]")
         rp("")
         _pause()
         return
@@ -802,19 +937,19 @@ def _screen_review(ctx: dict):
 
     met = sum(1 for e in intentions if "| met |" in e.get("content", ""))
     missed = sum(1 for e in intentions if "| missed |" in e.get("content", ""))
-
-    rp(
-        f"  [{_state_color(first)}]{_state_symbol(first)}  {first}[/{_state_color(first)}]"
-        f"  [dim]→[/dim]  "
-        f"[{_state_color(last)}]{_state_symbol(last)}  {last}[/{_state_color(last)}]"
-    )
-    rp("")
-    rule("  what held  ")
-    rp(f"  [{dominant_color}]{dominant}[/{dominant_color}] was the dominant state")
+    lines = [
+        (
+            f"[{_state_color(first)}]{_state_symbol(first)}  {first}[/{_state_color(first)}]"
+            f"  [dim]→[/dim]  "
+            f"[{_state_color(last)}]{_state_symbol(last)}  {last}[/{_state_color(last)}]"
+        ),
+        "",
+        f"[{AMBER_DIM}]what held[/{AMBER_DIM}]",
+        f"[{dominant_color}]{dominant}[/{dominant_color}] was the dominant state",
+    ]
     if met or missed:
-        rp(f"  [green]✓ {met} met[/green]  [dim]· {missed} missed[/dim]")
-    rp("")
-    rule("  what dropped  ")
+        lines.append(f"[green]✓ {met} met[/green]  [dim]· {missed} missed[/dim]")
+    lines.extend(["", f"[{AMBER_DIM}]what dropped[/{AMBER_DIM}]"])
 
     all_entries = body + spirit
     absent = [
@@ -824,11 +959,9 @@ def _screen_review(ctx: dict):
     ]
     if absent:
         for item in absent:
-            rp(f"  [dim]→ {item} mostly absent[/dim]")
+            lines.append(f"[dim]→ {item} mostly absent[/dim]")
     else:
-        rp(f"  [dim]→ no major absences detected[/dim]")
-
-    rp("")
+        lines.append("[dim]→ no major absences detected[/dim]")
 
     # Pull arcs from context
     from environments.pattern_weaver import weave
@@ -837,13 +970,21 @@ def _screen_review(ctx: dict):
     arcs = weave(states, body, mind, spirit, intentions)
     insights = [a for a in arcs if a.severity == "insight"]
     if insights:
-        rule("  pattern  ")
-        rp(f"  [{AMBER}]→[/{AMBER}]  {insights[0].message}")
-        rp("")
+        lines.extend(
+            [
+                "",
+                f"[{AMBER_DIM}]pattern[/{AMBER_DIM}]",
+                f"[{AMBER}]→[/{AMBER}]  {insights[0].message}",
+            ]
+        )
 
-    rule()
-    rp(f"  [dim]↩ to return[/dim]")
-    _read_key()
+    if wins:
+        lines.extend(["", f"[{AMBER_DIM}]wins[/{AMBER_DIM}]"])
+        for entry in wins[:5]:
+            note = entry.get("content", "").split("|", 1)[1].strip() if "|" in entry.get("content", "") else entry.get("content", "")
+            lines.append(f"[dim]•[/dim] {note}")
+
+    _paged_screen("  cycle review  ", lines)
 
 
 # ---------------------------------------------------------------------------
@@ -871,29 +1012,21 @@ def _screen_help():
         ("\\[r]eview", "cycle review — last 14 days, what held / dropped"),
         ("\\[c]heck", "refresh patterns and arcs"),
         ("\\[y]sync", "flush local store to garden (use when garden was down)"),
-        ("\\[t]rend", "show state trend chart"),
+        ("\\[t]ulpa", "multi-line stream capture — dump until /done or blank line"),
+        ("\\[T]rend", "show state trend chart"),
         ("\\[V]iz", "show viz dashboard"),
         ("\\[?] / \\[h]", "this screen"),
         ("\\[q]uit", "exit"),
     ]
 
-    for key, desc in keys:
-        rp(f"  [bold {AMBER}]{key:<16}[/bold {AMBER}]  [dim]{desc}[/dim]")
-
-    rp("")
-    rule()
-    rp("")
-    rp(f"  [{PALE}]STATE tags:[/{PALE}]")
-    rp("")
+    lines = [f"[bold {AMBER}]{key:<16}[/bold {AMBER}]  [dim]{desc}[/dim]" for key, desc in keys]
+    lines.extend(["", f"[{PALE}]STATE tags:[/{PALE}]", ""])
     for tag in sorted(STATE_SYMBOLS):
         c = _state_color(tag)
         sym = _state_symbol(tag)
-        rp(f"    [{c}]{sym}  {tag}[/{c}]")
+        lines.append(f"  [{c}]{sym}  {tag}[/{c}]")
 
-    rp("")
-    rule()
-    rp(f"  [dim]↩ or [q] to return[/dim]")
-    key = _read_key()
+    _paged_screen("  keys  ", lines)
 
 
 # ---------------------------------------------------------------------------
@@ -906,23 +1039,29 @@ def _screen_sync(ctx: dict):
 
     n = count_pending()
     if n == 0:
-        rp(f"\n  [dim]local store clean — nothing to sync[/dim]\n")
+        rp("")
+        _content("[dim]local store clean — nothing to sync[/dim]")
+        rp("")
         _pause(0.8)
         return
 
     if not garden_available():
-        rp(
-            f"\n  [{STATE_COLORS['depleted']}]garden unavailable — {n} entries waiting[/{STATE_COLORS['depleted']}]\n"
+        rp("")
+        _content(
+            f"[{STATE_COLORS['depleted']}]garden unavailable — {n} entries waiting[/{STATE_COLORS['depleted']}]"
         )
+        rp("")
         _pause(1.0)
         return
 
-    rp(f"\n  [{AMBER}]syncing {n} entries...[/{AMBER}]")
+    _status(f"[{AMBER}]flushing 0/{n}...[/]")
     result = sync_to_garden()
+    _status(f"[{AMBER}]flushing {result.get('synced', 0)}/{n}...[/]")
+    rp("")
     if result.get("error"):
-        rp(f"  [dim]error: {result['error']}[/dim]")
+        _content(f"[dim]error: {result['error']}[/dim]")
     else:
-        rp(f"  [green]✓ synced {result['synced']}[/green]", end="")
+        _content(f"[green]✓ synced {result['synced']}[/green]", end="")
         if result["failed"]:
             rp(f"  [dim]{result['failed']} failed[/dim]")
         else:
@@ -931,13 +1070,95 @@ def _screen_sync(ctx: dict):
     _pause(0.8)
 
 
+def _screen_tulpa(ctx: dict) -> bool:
+    """Multi-line tulpa stream capture. Collects lines until /done or blank after content."""
+    clr()
+    _draw_banner()
+    rule("  tulpa  ")
+    rp("")
+    _content(f"[{PALE}]stream mode. holding, not processing.[/{PALE}]")
+    _content("[dim]type /done or leave a blank line when you're finished[/dim]")
+    rp("")
+
+    lines: list[str] = []
+    while True:
+        prompt_sym = ">" if not lines else str(len(lines) + 1)
+        _content(f"[bold {AMBER}]{prompt_sym}[/bold {AMBER}] ", end="")
+        line = _read_line()
+        if line in ("/done", "/d"):
+            break
+        if not line:
+            if lines:
+                break
+            return False  # cancelled before anything typed
+        lines.append(line)
+
+    if not lines:
+        return False
+
+    text = "\n".join(lines)
+
+    rp("")
+    rule()
+    _status(f"[dim]parsing stream ({len(lines)} line{'s' if len(lines) != 1 else ''})...[/dim]")
+
+    from environments.vent_parser import parse_vent
+    from environments.local_store import remember as resilient_remember
+    from environments.survival_mode import filter_entries_for_survival
+
+    entries = parse_vent(text, log_date=ctx["today"])
+
+    survival = ctx["survival"]
+    if survival.active:
+        entries = filter_entries_for_survival(entries)
+
+    rp("")
+    logged = []
+    for e in entries:
+        content = e.to_garden()
+        _, dest = resilient_remember(content)
+        color = _state_color(e.category or "stable") if e.track == "STATE" else PALE
+        dest_note = " [dim](local)[/dim]" if dest == "local" else ""
+        _content(
+            f"[{color}]{e.track}[/{color}]  [dim]{e.category} | {e.status or ''} | {(e.note or '')[:40]}[/dim]{dest_note}"
+        )
+        logged.append(e)
+
+    if not logged:
+        _content("[dim](nothing parsed)[/dim]")
+        rp("")
+        _pause()
+        return False
+
+    from environments.pattern_weaver import weave
+
+    new_states = _recall("STATE:", 7)
+    new_body = _recall("BODY:", 7)
+    new_mind = _recall("MIND:", 7)
+    new_spirit = _recall("SPIRIT:", 7)
+    new_intentions = _recall("INTENTION:", 14)
+    arcs = weave(new_states, new_body, new_mind, new_spirit, new_intentions)
+    alerts = [a for a in arcs if a.severity == "alert"]
+
+    if alerts:
+        rp("")
+        rule()
+        _content(f"[bold {STATE_COLORS['manic']}]→[/bold {STATE_COLORS['manic']}]  {alerts[0].message}")
+
+    rp("")
+    _pause()
+    return True
+
+
 def _screen_trend(ctx: dict):
     from environments.viz import render_trend
     from environments.local_store import recall_resilient
 
     entries, _ = recall_resilient("STATE:", limit=200)
     if not entries:
-        rp(f"\n  [dim]no state data[/dim]\n")
+        rp("")
+        _content("[dim]no state data[/dim]")
+        rp("")
         _pause(0.8)
         return
 
@@ -948,7 +1169,7 @@ def _screen_trend(ctx: dict):
             rp(result)
             _pause(0)
     except Exception as e:
-        rp(f"  [dim]trend unavailable: {e}[/dim]")
+        _content(f"[dim]trend unavailable: {e}[/dim]")
         _pause(0.8)
 
 
@@ -966,7 +1187,7 @@ def _screen_viz(ctx: dict):
             rp(result)
             _pause(0)
     except Exception as e:
-        rp(f"  [dim]viz unavailable: {e}[/dim]")
+        _content(f"[dim]viz unavailable: {e}[/dim]")
         _pause(0.8)
 
 
@@ -979,7 +1200,7 @@ def _pause(seconds: float = 0):
     if seconds > 0:
         time.sleep(seconds)
     else:
-        rp(f"  [dim]↩  continue[/dim]", end="")
+        _content("[dim]↩  continue[/dim]", end="")
         _read_key()
 
 
@@ -1054,6 +1275,9 @@ def _run_loop():
             refresh = True
 
         elif key == "t":
+            refresh = _screen_tulpa(ctx)
+
+        elif key == "T":
             _screen_trend(ctx)
             refresh = True
 

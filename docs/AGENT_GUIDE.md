@@ -34,12 +34,14 @@ All entries write to the `cassette` graph.
 STATE: {date} | {tag} | {narrative}
 ```
 
-Valid tags: `surviving` `stable` `thriving` `grieving` `manic` `depleted` `flooded` `clear`
+Valid tags: `surviving` `stable` `grounded` `tender` `thriving` `grieving` `manic` `depleted` `flooded` `clear`
 
 Always exactly one STATE per session. Log the dominant emotional register, not the most recent word.
 
 Tag disambiguation:
 - `depleted` + high output = productivity spiral, not thriving
+- `grounded` = anchored and present — distinct from `stable` (grounded has active quality, not flat neutral)
+- `tender` = emotionally soft and open — distinct from `thriving` (tender is still, not momentum)
 - `manic` = elevated and fast, not just hyperfocused (hyperfocus is MIND.focus.hyper)
 - `grieving` = loss-adjacent, not necessarily sad
 - `clear` = post-storm perceptual sharpness — different from stable
