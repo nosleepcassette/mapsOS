@@ -158,16 +158,28 @@ def render_viz(
     text.append("BODY signals (7 days)\n", "bold green")
     body_cutoff = date.today() - timedelta(days=7)
     categories = ["sleep", "hunger", "pain", "movement", "energy"]
+    body_by_day: set[tuple[date, str]] = set()
+
+    for e in body_entries:
+        content = e.get("content", "") if isinstance(e, dict) else ""
+        if not content.startswith("BODY:"):
+            continue
+        parts = content.split("|")
+        if len(parts) < 2:
+            continue
+        date_str = parts[0].replace("BODY:", "").strip()
+        cat = parts[1].strip().lower()
+        try:
+            entry_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        except Exception:
+            continue
+        body_by_day.add((entry_date, cat))
 
     for cat in categories:
         text.append(f"{cat:10}", "cyan")
         for i in range(7):
             d = body_cutoff + timedelta(days=i)
-            present = any(
-                e.get("content", "").startswith(f"BODY:")
-                and cat in e.get("content", "")
-                for e in body_entries
-            )
+            present = (d, cat) in body_by_day
             if present:
                 text.append("■", "green")
             else:

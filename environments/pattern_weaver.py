@@ -11,16 +11,19 @@ Arc severity: "alert" (act now) vs "insight" (worth noting)
 from __future__ import annotations
 
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date
 from typing import Any, Optional
+
+from environments import arc_cooldown
 
 
 SURVIVAL_TRIGGER_TAGS = frozenset(["depleted", "grieving"])
 PATTERN_TRIGGER_TAGS = frozenset(["depleted", "grieving", "flooded", "surviving"])
 MANIC_TAGS = frozenset(["manic"])
 HIGH_STATES = frozenset(["thriving"])
+_ISO_DATE_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
 
 
 @dataclass
@@ -76,6 +79,126 @@ def _note(entry: Any) -> str:
     if hasattr(entry, "note") and entry.note:
         return entry.note
     return ""
+
+
+def _entry_dates(entry: Any) -> set[str]:
+    """Extract any ISO dates embedded in a raw dict or Entry object."""
+    if isinstance(entry, dict):
+        return set(_ISO_DATE_RE.findall(entry.get("content", "")))
+    if hasattr(entry, "date") and entry.date:
+        return {entry.date}
+    return set()
+
+
+def _entry_date(entry: Any) -> Optional[date]:
+    """Extract the primary ISO date from a raw dict or Entry object."""
+    for raw_date in sorted(_entry_dates(entry)):
+        try:
+            return date.fromisoformat(raw_date)
+        except ValueError:
+            continue
+    return None
+
+
+def _parse_resistance_entry(entry: Any) -> Optional[dict]:
+    """Parse RESISTANCE entries stored as `RESISTANCE: date | phrase | intensity`."""
+    content = entry.get("content", "") if isinstance(entry, dict) else ""
+    if isinstance(entry, dict):
+        if not content.startswith("RESISTANCE:"):
+            return None
+        parts = [p.strip() for p in content.split("|", 2)]
+        if len(parts) < 3:
+            return None
+        source = parts[1].lower()
+        intensity = parts[2].lower()
+    elif getattr(entry, "track", None) == "RESISTANCE":
+        note_parts = [p.strip() for p in (getattr(entry, "note", "") or "").split("|", 1)]
+        if len(note_parts) < 2:
+            return None
+        source = note_parts[0].lower()
+        intensity = note_parts[1].lower()
+    else:
+        return None
+
+    entry_date = _entry_date(entry)
+    if entry_date is None or not source:
+        return None
+
+    tokens = set(re.findall(r"\b[a-z]{5,}\b", source))
+    return {
+        "date": entry_date,
+        "source": source,
+        "intensity": intensity,
+        "tokens": tokens,
+    }
+
+
+def _parse_person_entry(entry: Any) -> Optional[dict]:
+    """Parse PERSON entries stored as `PERSON: date | name | context | sentiment`."""
+    content = entry.get("content", "") if isinstance(entry, dict) else ""
+    if isinstance(entry, dict):
+        if not content.startswith("PERSON:"):
+            return None
+        parts = [p.strip() for p in content.split("|", 3)]
+        if len(parts) < 4:
+            return None
+        name = parts[1].lower()
+        context = parts[2]
+        sentiment = parts[3].lower()
+    elif getattr(entry, "track", None) == "PERSON":
+        note_parts = [p.strip() for p in (getattr(entry, "note", "") or "").split("|", 2)]
+        if len(note_parts) < 3:
+            return None
+        name = note_parts[0].lower()
+        context = note_parts[1]
+        sentiment = note_parts[2].lower()
+    else:
+        return None
+
+    entry_date = _entry_date(entry)
+    if entry_date is None or not name:
+        return None
+
+    return {
+        "date": entry_date,
+        "name": name,
+        "context": context,
+        "sentiment": sentiment,
+    }
+
+
+def _parse_goal_entry(entry: Any) -> Optional[dict]:
+    """Parse GOAL entries stored as `GOAL: date | description | due | status`."""
+    content = entry.get("content", "") if isinstance(entry, dict) else ""
+    if isinstance(entry, dict):
+        if not content.startswith("GOAL:"):
+            return None
+        parts = [p.strip() for p in content.split("|", 3)]
+        if len(parts) < 4:
+            return None
+        description = parts[1]
+        due = parts[2]
+        status = parts[3].lower()
+    elif getattr(entry, "track", None) == "GOAL":
+        note_parts = [p.strip() for p in (getattr(entry, "note", "") or "").split("|", 2)]
+        if len(note_parts) < 3:
+            return None
+        description = note_parts[0]
+        due = note_parts[1]
+        status = note_parts[2].lower()
+    else:
+        return None
+
+    entry_date = _entry_date(entry)
+    if entry_date is None or not description:
+        return None
+
+    return {
+        "date": entry_date,
+        "description": description,
+        "due": due,
+        "status": status,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -494,12 +617,17 @@ def _arc_planning_hyperfocus(
     if not high_mind:
         return None
 
-    # No intentions logged today — planning without doing
-    today = date.today().isoformat()
+    # No intentions logged on the current session date — planning without doing
+    session_dates: set[str] = set()
+    for e in state_entries[-3:]:
+        session_dates.update(_entry_dates(e))
+    if not session_dates:
+        session_dates.add(date.today().isoformat())
+
     today_intentions = [
         e
         for e in intention_entries
-        if today in (e.get("content", "") if isinstance(e, dict) else "")
+        if _entry_dates(e) & session_dates
     ]
     if today_intentions:
         return None
@@ -649,38 +777,6 @@ def _arc_decision_pile(decision_entries: list) -> Optional[Arc]:
         )
     return None
 
-    from datetime import datetime, timedelta
-
-    now = datetime.now()
-    recent = []
-    for e in decision_entries:
-        content = e.get("content", "") if isinstance(e, dict) else ""
-        if content.startswith("DECISION:"):
-            parts = content.split("|", 1)
-            if len(parts) > 1:
-                date_part = parts[0].replace("DECISION:", "").strip()
-                try:
-                    entry_date = datetime.strptime(date_part, "%Y-%m-%d")
-                    if (now - entry_date).days <= 7:
-                        recent.append(content)
-                except Exception:
-                    recent.append(content)
-
-    if len(recent) >= 3:
-        oldest = recent[0] if recent else ""
-        desc = ""
-        if oldest:
-            parts = oldest.split("|")
-            if len(parts) > 1:
-                desc = parts[1].strip()[:50]
-        return Arc(
-            name="decision_pile",
-            severity="insight",
-            message=f"you had {len(recent)} unresolved decision points this week. want to revisit any of them?",
-            data={"count": len(recent), "oldest": desc},
-        )
-    return None
-
 
 def _arc_trigger_pattern(trigger_entries: list) -> Optional[Arc]:
     """ARC 21 — Trigger pattern (same trigger source recurring)."""
@@ -715,27 +811,15 @@ def _arc_goal_stall(goal_entries: list) -> Optional[Arc]:
     if not goal_entries:
         return None
 
-    from datetime import datetime, timedelta
-
-    now = datetime.now()
+    today = date.today()
     stalled = []
 
-    for e in goal_entries:
-        content = e.get("content", "") if isinstance(e, dict) else ""
-        if content.startswith("GOAL:"):
-            parts = content.split("|")
-            if len(parts) >= 3:
-                goal_desc = parts[1].strip() if len(parts) > 1 else ""
-                status = parts[2].strip() if len(parts) > 2 else ""
-                if status == "open":
-                    date_str = parts[0].replace("GOAL:", "").strip()
-                    try:
-                        entry_date = datetime.strptime(date_str, "%Y-%m-%d")
-                        days_open = (now - entry_date).days
-                        if days_open >= 14:
-                            stalled.append((goal_desc, days_open))
-                    except Exception:
-                        pass
+    for parsed in (_parse_goal_entry(entry) for entry in goal_entries):
+        if parsed is None or parsed["status"] != "open":
+            continue
+        days_open = (today - parsed["date"]).days
+        if days_open >= 14:
+            stalled.append((parsed["description"], days_open))
 
     if stalled:
         stalled.sort(key=lambda x: x[1], reverse=True)
@@ -747,6 +831,146 @@ def _arc_goal_stall(goal_entries: list) -> Optional[Arc]:
             data={"goal": goal, "days": days},
         )
     return None
+
+
+def _arc_resistance_pattern(resistance_entries: list) -> Optional[Arc]:
+    """ARC 23 — Repeated resistance source within a short window."""
+    parsed_entries = [
+        parsed
+        for parsed in (_parse_resistance_entry(entry) for entry in resistance_entries)
+        if parsed is not None and parsed["tokens"]
+    ]
+    if len(parsed_entries) < 3:
+        return None
+
+    token_groups: dict[str, list[dict]] = defaultdict(list)
+    for entry in parsed_entries:
+        for token in entry["tokens"]:
+            token_groups[token].append(entry)
+
+    best_window: tuple[int, int, list[dict]] | None = None
+    for entries in token_groups.values():
+        if len(entries) < 3:
+            continue
+        entries.sort(key=lambda item: item["date"])
+        start = 0
+        for end in range(len(entries)):
+            while (entries[end]["date"] - entries[start]["date"]).days > 14:
+                start += 1
+            window = entries[start : end + 1]
+            if len(window) < 3:
+                continue
+            candidate = (len(window), -window[0]["date"].toordinal(), window)
+            if best_window is None or candidate > best_window:
+                best_window = candidate
+
+    if best_window is None:
+        return None
+
+    window = best_window[2]
+    source = window[0]["source"]
+    span_days = max((window[-1]["date"] - window[0]["date"]).days, 1)
+    return Arc(
+        name="resistance_pattern",
+        severity="insight",
+        message=f"you've been resisting {source} for {span_days} days. worth naming why?",
+        data={"source": source, "count": len(window), "days": span_days},
+    )
+
+
+def _arc_negative_interaction_pattern(person_entries: list) -> Optional[Arc]:
+    """ARC 24 — Same person logged as negative repeatedly within 30 days."""
+    negative_entries = [
+        parsed
+        for parsed in (_parse_person_entry(entry) for entry in person_entries)
+        if parsed is not None and parsed["sentiment"] == "negative"
+    ]
+    if len(negative_entries) < 3:
+        return None
+
+    by_name: dict[str, list[dict]] = defaultdict(list)
+    for entry in negative_entries:
+        by_name[entry["name"]].append(entry)
+
+    best_window: tuple[int, int, str, list[dict]] | None = None
+    for name, entries in by_name.items():
+        if len(entries) < 3:
+            continue
+        entries.sort(key=lambda item: item["date"])
+        start = 0
+        for end in range(len(entries)):
+            while (entries[end]["date"] - entries[start]["date"]).days > 30:
+                start += 1
+            window = entries[start : end + 1]
+            if len(window) < 3:
+                continue
+            candidate = (len(window), -window[0]["date"].toordinal(), name, window)
+            if best_window is None or candidate > best_window:
+                best_window = candidate
+
+    if best_window is None:
+        return None
+
+    name = best_window[2]
+    return Arc(
+        name="negative_interaction_pattern",
+        severity="insight",
+        message=f"{name} is consistently showing up as draining. pattern worth noticing.",
+        data={"name": name, "count": len(best_window[3])},
+    )
+
+
+def _arc_exec_dysfunction(
+    state_entries: list,
+    resistance_entries: list,
+    goal_entries: list,
+) -> Optional[Arc]:
+    """ARC 25 — Low state + high resistance + stalled open goal."""
+    if not state_entries:
+        return None
+
+    current_state = _tag(state_entries[-1])
+    if current_state in ("grieving", "surviving"):
+        return None
+    if current_state not in ("depleted", "flooded", "manic"):
+        return None
+
+    today = date.today()
+    recent_high_resistance = [
+        parsed
+        for parsed in (_parse_resistance_entry(entry) for entry in resistance_entries)
+        if parsed is not None
+        and parsed["intensity"] == "high"
+        and 0 <= (today - parsed["date"]).days <= 7
+    ]
+    if not recent_high_resistance:
+        return None
+
+    stalled_goals = [
+        parsed
+        for parsed in (_parse_goal_entry(entry) for entry in goal_entries)
+        if parsed is not None
+        and parsed["status"] == "open"
+        and (today - parsed["date"]).days >= 14
+    ]
+    if not stalled_goals:
+        return None
+
+    stalled_goals.sort(key=lambda item: item["date"])
+    goal = stalled_goals[0]["description"]
+    return Arc(
+        name="exec_dysfunction",
+        severity="insight",
+        message=(
+            f"resistance is high and {goal} has been stalled. "
+            "exec dysfunction pattern. what's the one thing that doesn't require starting?"
+        ),
+        data={
+            "state": current_state,
+            "goal": goal,
+            "resistance_count": len(recent_high_resistance),
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -765,6 +989,8 @@ def weave(
     trigger_entries: list = None,
     goal_entries: list = None,
     person_entries: list = None,
+    resistance_entries: list = None,
+    apply_cooldown: bool = True,
 ) -> list[Arc]:
     """
     Run all arc detectors in priority order.
@@ -781,6 +1007,8 @@ def weave(
         goal_entries = []
     if person_entries is None:
         person_entries = []
+    if resistance_entries is None:
+        resistance_entries = []
 
     arcs: list[Arc] = []
 
@@ -825,6 +1053,9 @@ def weave(
     arcs.append(_arc_decision_pile(decision_entries))
     arcs.append(_arc_trigger_pattern(trigger_entries))
     arcs.append(_arc_goal_stall(goal_entries))
+    arcs.append(_arc_resistance_pattern(resistance_entries))
+    arcs.append(_arc_negative_interaction_pattern(person_entries))
+    arcs.append(_arc_exec_dysfunction(state_entries, resistance_entries, goal_entries))
 
     # Intrusive loop — requires flash entries
     if flash_entries:
@@ -832,7 +1063,25 @@ def weave(
         if arc is not None:
             arcs.append(arc)
 
-    return [a for a in arcs if a is not None]
+    arcs = [a for a in arcs if a is not None]
+
+    if not apply_cooldown or not arcs:
+        return arcs
+
+    cooldowns = arc_cooldown.load_cooldowns()
+    visible_arcs: list[Arc] = []
+    for arc in arcs:
+        cooldown_days = arc_cooldown.ARC_COOLDOWNS.get(arc.name, 0)
+        if (
+            arc.severity != "survival"
+            and arc_cooldown.is_suppressed(arc.name, cooldowns, cooldown_days)
+        ):
+            continue
+        visible_arcs.append(arc)
+        cooldowns = arc_cooldown.record_fired(arc.name, cooldowns)
+
+    arc_cooldown.save_cooldowns(cooldowns)
+    return visible_arcs
 
 
 def check_survival_trigger(state_entries: list) -> bool:

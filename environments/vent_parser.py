@@ -798,11 +798,13 @@ def _extract_trigger_entries(text: str, log_date: str) -> list[Entry]:
     t_lower = text.lower()
 
     _TRIGGER_PATTERNS = [
-        "because",
-        "said",
         "when i saw",
         "triggered by",
         "set off by",
+        "they said",
+        "she said",
+        "he said",
+        "told me",
     ]
 
     for pattern in _TRIGGER_PATTERNS:
@@ -884,43 +886,64 @@ def _extract_event_entries(text: str, log_date: str, today=None) -> list[Entry]:
     except Exception:
         _resolve_date = None
 
+    if today is None:
+        today = date.today()
+
     entries = []
     t_lower = text.lower()
 
-    _EVENT_TRIGGERS = ["therapy on", "have", "on", "appointment"]
+    _EVENT_TRIGGERS = [
+        "therapy on",
+        "appointment on",
+        "appointment",
+        "meeting on",
+        "on monday",
+        "on tuesday",
+        "on wednesday",
+        "on thursday",
+        "on friday",
+        "on saturday",
+        "on sunday",
+        "that thing on",
+    ]
+    _DATE_PHRASE_RE = re.compile(
+        r"\b(?:today|tomorrow|next week|next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|monday|tuesday|wednesday|thursday|friday|saturday|sunday|in\s+\d+\s+days?|in\s+\d+\s+weeks?)\b"
+    )
+    seen_matches: list[tuple[int, int, str]] = []
 
     for trigger in _EVENT_TRIGGERS:
-        if trigger in t_lower:
-            idx = t_lower.find(trigger)
-            start = max(0, idx - 30)
-            end = min(len(text), idx + 60)
-            phrase = text[start:end].strip()
+        for match in re.finditer(re.escape(trigger), t_lower):
+            window_start = match.start()
+            window_end = min(len(text), match.end() + 60)
+            window_lower = t_lower[window_start:window_end]
+            date_match = _DATE_PHRASE_RE.search(window_lower)
+            if not date_match or not _resolve_date:
+                continue
 
-            for day in (
-                "monday",
-                "tuesday",
-                "wednesday",
-                "thursday",
-                "friday",
-                "saturday",
-                "sunday",
+            date_phrase = window_lower[date_match.start() : date_match.end()]
+            event_date = _resolve_date(date_phrase, today)
+            if not event_date:
+                continue
+
+            event_date_iso = event_date.isoformat()
+            if any(
+                seen_date == event_date_iso
+                and not (match.end() <= seen_start or match.start() >= seen_end)
+                for seen_start, seen_end, seen_date in seen_matches
             ):
-                day_idx = phrase.lower().find(day)
-                if day_idx >= 0:
-                    day_phrase = phrase[day_idx : day_idx + 20].strip()
-                    if _resolve_date:
-                        event_date = _resolve_date(day_phrase, today)
-                        if event_date:
-                            entries.append(
-                                Entry(
-                                    track="EVENT",
-                                    date=log_date,
-                                    category=None,
-                                    status=None,
-                                    note=f"{event_date.isoformat()} | {day_phrase}",
-                                )
-                            )
-                    break
+                continue
+            seen_matches.append((match.start(), match.end(), event_date_iso))
+
+            description = text[window_start:window_end].strip().rstrip(".,!?;")
+            entries.append(
+                Entry(
+                    track="EVENT",
+                    date=log_date,
+                    category=None,
+                    status=None,
+                    note=f"{event_date_iso} | {description[:60]}",
+                )
+            )
 
     return entries
 
@@ -1048,8 +1071,12 @@ def parse_vent(text: str, log_date: Optional[str] = None) -> list[Entry]:
     entries.extend(_extract_resistance_entries(text, log_date))
     entries.extend(_extract_trigger_entries(text, log_date))
     entries.extend(_extract_goal_entries(text, log_date))
-
-    return _dedup_by_category([e for e in entries if e.track != "WIN"]) + wins
+    entries.extend(_extract_event_entries(text, log_date, date.today()))
+    entries.extend(_extract_deadline_entries(text, log_date, date.today()))
+    non_dedup_tracks = {"WIN", "EVENT", "DEADLINE"}
+    deduped = _dedup_by_category([e for e in entries if e.track not in non_dedup_tracks])
+    non_deduped = [e for e in entries if e.track in non_dedup_tracks]
+    return deduped + non_deduped
 
 
 def format_garden_commands(entries: list[Entry], graph: str = "cassette") -> list[str]:

@@ -31,7 +31,7 @@ def resolve_date(text: str, today: Optional[date] = None) -> Optional[date]:
     if t in ("today", "now"):
         return today
 
-    if t in ("tomorrow", "tomorrow"):
+    if t == "tomorrow":
         return today + timedelta(days=1)
 
     if t in _WEEKDAYS:

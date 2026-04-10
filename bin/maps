@@ -23,17 +23,21 @@ Usage:
   maps sync --status   # show how many entries are waiting
   maps tulpa           # multi-line stream capture (full tulpa protocol)
   maps eval            # show cassette's maps-os performance trend
+  maps person maggie   # show person context + recent interactions
 """
 from __future__ import annotations
 
 import argparse
+import json
 import sys
-from datetime import date
+from collections import Counter
+from datetime import date, datetime
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
+from environments.maps_os_config import known_people, person_birth_hint, person_context
 from environments.vent_parser import parse_vent, VALID_STATE_TAGS
 from environments.pattern_weaver import weave
 from environments.survival_mode import (
@@ -55,6 +59,119 @@ def _today() -> str:
     return date.today().isoformat()
 
 
+def _display_person_name(name: str) -> str:
+    return "-".join(part.capitalize() for part in name.split("-"))
+
+
+def _days_ago_text(value: date) -> str:
+    days = (date.today() - value).days
+    if days <= 0:
+        return "today"
+    if days == 1:
+        return "1 day ago"
+    return f"{days} days ago"
+
+
+def _home_relative(path: Path) -> str:
+    try:
+        return str(path).replace(str(Path.home()), "~", 1)
+    except Exception:
+        return str(path)
+
+
+def _astrolog_dir() -> Path:
+    return Path.home() / ".hermes" / "astrolog"
+
+
+def _astrolog_profile_path(name: str) -> Path:
+    safe_name = name.lower().replace("-", "_")
+    return _astrolog_dir() / f"{safe_name}_profile.json"
+
+
+def _parse_person_entry(content: str) -> dict | None:
+    if not content.startswith("PERSON:"):
+        return None
+
+    parts = [p.strip() for p in content.split("|")]
+    if len(parts) < 4:
+        return None
+
+    date_str = parts[0].replace("PERSON:", "").strip()
+    try:
+        entry_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+    return {
+        "date": entry_date,
+        "name": parts[1].lower(),
+        "context": parts[2],
+        "sentiment": parts[3].lower(),
+    }
+
+
+def _person_entries_by_name(entries: list[dict]) -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = {}
+    for entry in entries:
+        parsed = _parse_person_entry(entry.get("content", ""))
+        if not parsed:
+            continue
+        grouped.setdefault(parsed["name"], []).append(parsed)
+    for name in grouped:
+        grouped[name].sort(key=lambda item: item["date"], reverse=True)
+    return grouped
+
+
+def _build_astrolog_profile(name: str) -> tuple[dict, str]:
+    context = person_context(name)
+    birth_hint = person_birth_hint(name)
+    birth_date = birth_hint.get("birth_date")
+    birth_place = birth_hint.get("birth_place")
+    comment = birth_hint.get("comment", "")
+
+    profile = {
+        "name": _display_person_name(name),
+        "birth": {
+            "date": birth_date or None,
+            "time": None,
+            "timezone": None,
+            "fold": 0,
+        },
+        "location": {
+            "place": birth_place or None,
+            "latitude": None,
+            "longitude": None,
+        },
+        "astrolog": {
+            "zone": None,
+            "daylight": "0",
+            "binary": "/Users/maps/dev/astrolog/astrolog",
+            "chart_file": None,
+            "ephemeris_mode": "default",
+        },
+        "relationship": {
+            "role": context.get("role") or "",
+            "notes": context.get("notes") or "",
+        },
+        "birth_data_needed": not bool(birth_date),
+        "updated_at": datetime.now().isoformat(timespec="seconds"),
+    }
+
+    if birth_date:
+        notes = "birth date parsed from config comment"
+        if birth_place:
+            notes += "; place parsed from config comment"
+        if comment and "uncertain" in comment.lower():
+            notes += "; source comment marks location as uncertain"
+        notes += "; birth time and astrolog-specific details may still be needed."
+        profile["birth_notes"] = notes
+        status = "birth date known"
+    else:
+        status = "birth data needed"
+
+    return profile, status
+
+
 def _remember(content: str, graph: str, dry_run: bool = False) -> str:
     """
     Write a single entry. Returns 'garden', 'local', or 'dry'.
@@ -72,6 +189,185 @@ def _remember(content: str, graph: str, dry_run: bool = False) -> str:
 def _recall(prefix: str, graph: str, limit: int = 7) -> list[dict]:
     entries, _ = recall_resilient(prefix, graph=graph, limit=limit)
     return entries
+
+
+def _parse_iso_date(value: str) -> date | None:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date()
+    except Exception:
+        return None
+
+
+def _reference_today(raw_date: str | None = None) -> date:
+    return _parse_iso_date(raw_date or "") or date.today()
+
+
+def _parse_win_entry(content: str) -> dict | None:
+    if not content.startswith("WIN:"):
+        return None
+
+    parts = [p.strip() for p in content.split("|", 1)]
+    if len(parts) < 2 or not parts[1]:
+        return None
+
+    entry_date = _parse_iso_date(parts[0].replace("WIN:", "").strip())
+    if entry_date is None:
+        return None
+
+    return {"date": entry_date, "note": parts[1]}
+
+
+def _group_wins_by_week(win_entries: list[dict]) -> list[tuple[tuple[int, int], list[dict]]]:
+    grouped: dict[tuple[int, int], list[dict]] = {}
+    for win in sorted(win_entries, key=lambda item: item["date"], reverse=True):
+        iso = win["date"].isocalendar()
+        key = (iso.year, iso.week)
+        grouped.setdefault(key, []).append(win)
+    return [(key, grouped[key]) for key in sorted(grouped, reverse=True)]
+
+
+def _filter_entries_for_period(
+    entries: list[dict],
+    *,
+    today: date,
+    days: int | None = None,
+    week: bool = False,
+    month: bool = False,
+) -> list[dict]:
+    filtered: list[dict] = []
+    current_iso = today.isocalendar()
+
+    for entry in entries:
+        entry_date = entry.get("date")
+        if not isinstance(entry_date, date):
+            continue
+        if entry_date > today:
+            continue
+        if days is not None and (today - entry_date).days > days:
+            continue
+        if week:
+            iso = entry_date.isocalendar()
+            if (iso.year, iso.week) != (current_iso.year, current_iso.week):
+                continue
+        if month and (entry_date.year, entry_date.month) != (today.year, today.month):
+            continue
+        filtered.append(entry)
+
+    return filtered
+
+
+def _parse_goal_entry(content: str) -> dict | None:
+    if not content.startswith("GOAL:"):
+        return None
+
+    parts = [p.strip() for p in content.split("|", 3)]
+    if len(parts) < 4:
+        return None
+
+    entry_date = _parse_iso_date(parts[0].replace("GOAL:", "").strip())
+    if entry_date is None:
+        return None
+
+    return {
+        "date": entry_date,
+        "description": parts[1],
+        "due": parts[2],
+        "status": parts[3].lower(),
+    }
+
+
+def _latest_goals(entries: list[dict]) -> list[dict]:
+    latest: dict[str, dict] = {}
+    for entry in entries:
+        parsed = _parse_goal_entry(entry.get("content", ""))
+        if not parsed:
+            continue
+        key = parsed["description"].lower()
+        if key not in latest:
+            latest[key] = parsed
+    return list(latest.values())
+
+
+def _parse_intention_entry(content: str) -> dict | None:
+    if not content.startswith("INTENTION:"):
+        return None
+
+    parts = [p.strip() for p in content.split("|", 3)]
+    if len(parts) < 3:
+        return None
+
+    entry_date = _parse_iso_date(parts[2])
+    if entry_date is None:
+        return None
+
+    return {
+        "name": parts[0].replace("INTENTION:", "").strip(),
+        "status": parts[1].lower(),
+        "date": entry_date,
+        "note": parts[3] if len(parts) > 3 else "",
+    }
+
+
+def _parse_state_entry(content: str) -> dict | None:
+    if not content.startswith("STATE:"):
+        return None
+
+    parts = [p.strip() for p in content.split("|", 2)]
+    if len(parts) < 2:
+        return None
+
+    entry_date = _parse_iso_date(parts[0].replace("STATE:", "").strip())
+    if entry_date is None:
+        return None
+
+    return {
+        "date": entry_date,
+        "tag": parts[1].lower(),
+        "note": parts[2] if len(parts) > 2 else "",
+    }
+
+
+def _summarize_eval(
+    intention_entries: list[dict],
+    state_entries: list[dict],
+    *,
+    today: date,
+    days: int = 30,
+) -> dict:
+    parsed_intentions = [
+        parsed
+        for parsed in (
+            _parse_intention_entry(entry.get("content", "")) for entry in intention_entries
+        )
+        if parsed is not None
+    ]
+    parsed_states = [
+        parsed
+        for parsed in (_parse_state_entry(entry.get("content", "")) for entry in state_entries)
+        if parsed is not None
+    ]
+
+    filtered_intentions = _filter_entries_for_period(parsed_intentions, today=today, days=days)
+    filtered_states = _filter_entries_for_period(parsed_states, today=today, days=days)
+
+    intention_counts = Counter(
+        entry["status"]
+        for entry in filtered_intentions
+        if entry["status"] in ("met", "missed", "partial")
+    )
+    total_intentions = sum(intention_counts.values())
+    weighted_met = intention_counts.get("met", 0) + (0.5 * intention_counts.get("partial", 0))
+    met_rate = (weighted_met / total_intentions) if total_intentions else None
+    state_counts = Counter(entry["tag"] for entry in filtered_states)
+
+    return {
+        "days": days,
+        "intentions_total": total_intentions,
+        "intention_counts": intention_counts,
+        "met_rate": met_rate,
+        "state_counts": state_counts,
+        "arc_count": None,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -311,73 +607,116 @@ def cmd_tulpa(args) -> int:
 
 def cmd_eval(args) -> int:
     """
-    Show cassette's maps-os performance trend from passive-rl history.
-    Reads from ~/.hermes/logs/.atropos-history.json.
+    Show recent intention/state performance for cassette.
     """
-    import json as _json
+    today = _reference_today(getattr(args, "date", None))
+    days = args.days if getattr(args, "days", None) else 30
 
-    atropos_path = Path.home() / ".hermes" / "logs" / ".atropos-history.json"
+    intention_entries = _recall("INTENTION:", args.graph, limit=60)
+    state_entries = _recall("STATE:", args.graph, limit=30)
+    summary = _summarize_eval(
+        intention_entries,
+        state_entries,
+        today=today,
+        days=days,
+    )
 
-    if not atropos_path.exists():
-        print("no eval history yet.")
-        print("  sessions are evaluated passively — run a few and check back.")
-        return 0
+    met_rate = summary["met_rate"]
+    if met_rate is None:
+        met_rate_text = "n/a"
+    else:
+        met_rate_text = f"{met_rate * 100:.0f}%"
 
     try:
-        with open(atropos_path) as f:
-            history = _json.load(f)
-    except Exception as e:
-        print(f"could not read history: {e}", file=sys.stderr)
-        return 1
+        from rich.console import Console
+        from rich.table import Table
 
-    sessions = [h for h in history if h.get("agent") in ("cassette", "maps-os", None)]
-    if not sessions:
-        print("no cassette sessions in history.")
+        console = Console()
+
+        metrics = Table(title=f"maps eval — last {days} days")
+        metrics.add_column("Metric")
+        metrics.add_column("Value")
+        metrics.add_row("Intentions logged", str(summary["intentions_total"]))
+        metrics.add_row(
+            "Intention met rate",
+            (
+                f"{met_rate_text}  "
+                f"(met {summary['intention_counts'].get('met', 0)} / "
+                f"partial {summary['intention_counts'].get('partial', 0)} / "
+                f"missed {summary['intention_counts'].get('missed', 0)})"
+            ),
+        )
+        arc_text = (
+            str(summary["arc_count"])
+            if summary["arc_count"] is not None
+            else "arc history not persisted yet"
+        )
+        metrics.add_row("Arc fire count", arc_text)
+        console.print(metrics)
+
+        states = Table(title="STATE distribution")
+        states.add_column("State")
+        states.add_column("Count", justify="right")
+        if summary["state_counts"]:
+            for tag, count in sorted(
+                summary["state_counts"].items(),
+                key=lambda item: (-item[1], item[0]),
+            ):
+                states.add_row(tag, str(count))
+        else:
+            states.add_row("none", "0")
+        console.print(states)
+    except Exception:
+        print(f"maps eval — last {days} days")
+        print(f"intentions logged: {summary['intentions_total']}")
+        print(
+            "intention met rate: "
+            f"{met_rate_text} "
+            f"(met {summary['intention_counts'].get('met', 0)} / "
+            f"partial {summary['intention_counts'].get('partial', 0)} / "
+            f"missed {summary['intention_counts'].get('missed', 0)})"
+        )
+        if summary["state_counts"]:
+            print("state distribution:")
+            for tag, count in sorted(
+                summary["state_counts"].items(),
+                key=lambda item: (-item[1], item[0]),
+            ):
+                print(f"  {tag}: {count}")
+        else:
+            print("state distribution: none")
+        print("arc fire count: arc history not persisted yet")
+    return 0
+
+
+def cmd_wins(args) -> int:
+    """Show recent WIN entries grouped by ISO week."""
+    today = _reference_today(getattr(args, "date", None))
+    raw_entries = _recall("WIN:", args.graph, limit=50)
+    parsed_wins = [
+        parsed
+        for parsed in (_parse_win_entry(entry.get("content", "")) for entry in raw_entries)
+        if parsed is not None
+    ]
+
+    if args.week:
+        wins = _filter_entries_for_period(parsed_wins, today=today, week=True)
+    elif args.month:
+        wins = _filter_entries_for_period(parsed_wins, today=today, month=True)
+    else:
+        wins = _filter_entries_for_period(parsed_wins, today=today, days=30)
+
+    grouped = _group_wins_by_week(wins)
+    if not grouped:
+        print("no wins logged in this period.")
         return 0
 
-    totals = [s.get("total_reward", 0) for s in sessions]
-    recent_10 = totals[-10:]
-    avg_all = sum(totals) / len(totals)
-    avg_recent = sum(recent_10) / len(recent_10)
-    delta = avg_recent - avg_all
-
-    print(f"sessions tracked:  {len(sessions)}")
-    print(f"avg total reward:  {avg_all:.2f}")
-
-    trend = f"+{delta:.2f}" if delta >= 0 else f"{delta:.2f}"
-    print(f"recent 10 avg:     {avg_recent:.2f}  ({trend})")
-    print()
-
-    all_rewards = [s.get("rewards", {}) for s in sessions if "rewards" in s]
-    if all_rewards:
-        _COMPONENTS = [
-            ("state_logged",      0.25),
-            ("correct_state",     0.20),
-            ("track_coverage",    0.20),
-            ("tool_coverage",     0.15),
-            ("no_streak_language", 0.10),
-            ("survival_correct",  0.10),
-        ]
-        best = ("", -1.0)
-        worst = ("", 2.0)
-        for key, max_weight in _COMPONENTS:
-            vals = [r.get(key, 0) for r in all_rewards]
-            if not vals:
-                continue
-            avg = sum(vals) / len(vals)
-            if avg > best[1]:
-                best = (key, avg)
-            if avg < worst[1]:
-                worst = (key, avg)
-
-        if best[0]:
-            print(f"strongest:  {best[0]}  ({best[1]:.2f}/{dict(_COMPONENTS).get(best[0], 1):.2f} avg)")
-        if worst[0] and worst[0] != best[0]:
-            print(f"weakest:    {worst[0]}  ({worst[1]:.2f}/{dict(_COMPONENTS).get(worst[0], 1):.2f} avg)")
-
-    print()
-    print("  cassette tracking coverage visible here only.")
-    print("  cycle review will mention coverage %.")
+    for index, ((year, week), entries) in enumerate(grouped):
+        if index:
+            print()
+        print(f"week {week}, {year}")
+        for entry in entries:
+            print(f"  - {entry['date'].isoformat()}  {entry['note']}")
     return 0
 
 
@@ -425,8 +764,6 @@ def cmd_viz(args) -> int:
 
 def cmd_connect(args) -> int:
     """Log connection with a person."""
-    from environments.maps_os_config import known_people
-
     if args.status:
         entries = _recall("PERSON:", args.graph, limit=100)
         if not entries:
@@ -475,6 +812,118 @@ def cmd_connect(args) -> int:
     return 0
 
 
+def cmd_person(args) -> int:
+    """Show person context or initialize astrolog skeleton profiles."""
+    if args.init_astrolog:
+        astrolog_dir = _astrolog_dir()
+        astrolog_dir.mkdir(parents=True, exist_ok=True)
+
+        seen: set[str] = set()
+        for name in known_people():
+            if not name or name in seen:
+                continue
+            seen.add(name)
+
+            context = person_context(name)
+            alias_hint = " ".join(
+                str(context.get(field, "")).lower() for field in ("role", "notes")
+            )
+            if "nickname for" in alias_hint:
+                print(f"skipped: {_home_relative(_astrolog_profile_path(name))} [alias]")
+                continue
+
+            profile_path = _astrolog_profile_path(name)
+            if profile_path.exists():
+                print(f"skipped: {_home_relative(profile_path)} [exists]")
+                continue
+
+            profile, status = _build_astrolog_profile(name)
+            if not args.dry_run:
+                profile_path.write_text(
+                    json.dumps(profile, indent=2) + "\n", encoding="utf-8"
+                )
+            print(f"created: {_home_relative(profile_path)} [{status}]")
+        return 0
+
+    person_entries = _recall("PERSON:", args.graph, limit=100)
+    grouped_entries = _person_entries_by_name(person_entries)
+
+    if args.list:
+        ordered_names: list[str] = []
+        seen = set()
+        for person_name in known_people():
+            if person_name and person_name not in seen:
+                ordered_names.append(person_name)
+                seen.add(person_name)
+        for person_name in sorted(grouped_entries):
+            if person_name not in seen:
+                ordered_names.append(person_name)
+                seen.add(person_name)
+
+        if not ordered_names:
+            print("no known people configured")
+            return 0
+
+        for person_name in ordered_names:
+            context = person_context(person_name)
+            role = context.get("role", "").strip()
+            records = grouped_entries.get(person_name, [])
+            if records:
+                last_contact = records[0]["date"]
+                contact_text = (
+                    f"last contact {last_contact.isoformat()}  "
+                    f"({_days_ago_text(last_contact)})"
+                )
+            else:
+                contact_text = "no contacts logged"
+            suffix = f"  {role}" if role else ""
+            print(f"{person_name:<14} {contact_text}{suffix}")
+        return 0
+
+    name = (args.name[0] if args.name else "").lower().strip()
+    if not name:
+        print("usage: maps person <name> | maps person --list | maps person --init-astrolog")
+        return 1
+
+    context = person_context(name)
+    role = context.get("role", "").strip()
+    notes = context.get("notes", "").strip()
+    records = grouped_entries.get(name, [])
+
+    header = name
+    if role:
+        header = f"{header} — {role}"
+    print(header)
+    if notes:
+        print(notes)
+        print()
+
+    if records:
+        last_contact = records[0]["date"]
+        print(f"last contact:  {last_contact.isoformat()}  ({_days_ago_text(last_contact)})")
+        print(f"contacts logged: {len(records)}")
+        print()
+        print("recent interactions:")
+        for record in records[:3]:
+            print(
+                f"  {record['date'].isoformat()}  {record['sentiment']:<8} {record['context']}"
+            )
+    else:
+        print("last contact:  no contacts logged")
+        print("contacts logged: 0")
+
+    astrolog_path = _astrolog_profile_path(name)
+    print()
+    if astrolog_path.exists():
+        print(f"astrolog: {_home_relative(astrolog_path)} ✓")
+    else:
+        print(f"astrolog: [no astrolog profile] {_home_relative(astrolog_path)}")
+
+    # TODO: support `maps person <name> --birth "YYYY-MM-DD HH:MM City"` to
+    # populate or upgrade astrolog profiles from new birth data.
+    return 0
+
+
 def cmd_goal(args) -> int:
     """Goal management."""
     if args.list:
@@ -483,33 +932,21 @@ def cmd_goal(args) -> int:
             print("no open goals")
             return 0
 
-        from datetime import datetime, timedelta
-        now = datetime.now().date()
+        now = _reference_today(getattr(args, "date", None))
         goals = []
 
-        for e in entries:
-            content = e.get("content", "")
-            if not content.startswith("GOAL:"):
+        for goal in _latest_goals(entries):
+            if goal["status"] not in ("open", "in_progress"):
                 continue
-            parts = content.split("|")
-            if len(parts) >= 3:
-                status = parts[2].strip()
-                if status == "open":
-                    date_str = parts[0].replace("GOAL:", "").strip()
-                    goal_desc = parts[1].strip()
-                    try:
-                        entry_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-                        days_open = (now - entry_date).days
-                        goals.append((goal_desc, date_str, days_open))
-                    except Exception:
-                        goals.append((goal_desc, date_str, 0))
+            days_open = max((now - goal["date"]).days, 0)
+            goals.append((goal["description"], goal["due"], days_open))
 
         if not goals:
             print("no open goals")
             return 0
 
-        for goal, date_str, days in sorted(goals, key=lambda x: x[2], reverse=True):
-            due_str = ""
+        for goal, due_str, days in sorted(goals, key=lambda x: x[2], reverse=True):
+            due_str = due_str if due_str and due_str != "none" else "none"
             print(f"{goal}  [due: {due_str}]  ({days} days open)")
         return 0
 
@@ -518,19 +955,41 @@ def cmd_goal(args) -> int:
         entries = _recall("GOAL:", args.graph, limit=50)
         matched = None
 
-        for e in entries:
-            content = e.get("content", "")
-            if content.startswith("GOAL:") and phrase.lower() in content.lower():
-                parts = content.split("|")
-                if len(parts) >= 2:
-                    matched = parts[1].strip()
-                    break
+        for goal in _latest_goals(entries):
+            if phrase.lower() in goal["description"].lower():
+                matched = goal
+                break
 
         if matched:
-            content = f"GOAL: {_today()} | {matched} | done"
+            content = (
+                f"GOAL: {_today()} | {matched['description']} | "
+                f"{matched['due']} | done"
+            )
             _remember(content, graph=args.graph, dry_run=args.dry_run)
             if not args.dry_run:
-                print(f"  goal marked done: {matched}")
+                print(f"  goal marked done: {matched['description']}")
+        else:
+            print(f"  goal not found: {phrase}")
+        return 0
+
+    if getattr(args, "update", None):
+        phrase = args.update[0] if args.update else ""
+        entries = _recall("GOAL:", args.graph, limit=50)
+        matched = None
+
+        for goal in _latest_goals(entries):
+            if phrase.lower() in goal["description"].lower():
+                matched = goal
+                break
+
+        if matched:
+            content = (
+                f"GOAL: {_today()} | {matched['description']} | "
+                f"{matched['due']} | in_progress"
+            )
+            _remember(content, graph=args.graph, dry_run=args.dry_run)
+            if not args.dry_run:
+                print("  ↻ goal updated: in_progress")
         else:
             print(f"  goal not found: {phrase}")
         return 0
@@ -564,7 +1023,7 @@ def cmd_events(args) -> int:
         print("no upcoming events")
         return 0
 
-    from datetime import datetime, date as date_module
+    from datetime import datetime, timedelta
     today = datetime.now().date()
     events = []
 
@@ -572,18 +1031,19 @@ def cmd_events(args) -> int:
         content = e.get("content", "")
         if not content.startswith("EVENT:"):
             continue
-        parts = content.split("|")
-        if len(parts) >= 2:
-            note = parts[1].strip()
-            if "|" in note:
-                date_str = note.split("|")[0].strip()
-                desc = note.split("|")[1].strip() if len(note.split("|")) > 1 else ""
-                try:
-                    event_date = datetime.strptime(date_str, "%Y-%m-%d").date()
-                    if event_date >= today:
-                        events.append((event_date, desc))
-                except Exception:
-                    pass
+        parts = [p.strip() for p in content.split("|")]
+        if len(parts) >= 3:
+            date_str = parts[1]
+            desc = " | ".join(parts[2:])
+            try:
+                event_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+                if event_date < today:
+                    continue
+                if args.week and event_date > today + timedelta(days=7):
+                    continue
+                events.append((event_date, desc))
+            except Exception:
+                pass
 
     if not events:
         print("no upcoming events")
@@ -601,6 +1061,11 @@ def cmd_check(args, quiet: bool = False) -> int:
     spirit_entries    = _recall("SPIRIT:",    args.graph, limit=7)
     intention_entries = _recall("INTENTION:", args.graph, limit=14)
     flash_entries     = _recall("FLASH:",     args.graph, limit=10)
+    decision_entries  = _recall("DECISION:",  args.graph, limit=14)
+    trigger_entries   = _recall("TRIGGER:",   args.graph, limit=14)
+    goal_entries      = _recall("GOAL:",      args.graph, limit=21)
+    person_entries    = _recall("PERSON:",    args.graph, limit=21)
+    resistance_entries = _recall("RESISTANCE:", args.graph, limit=21)
 
     survival = eval_survival(state_entries)
     if survival.active:
@@ -612,7 +1077,19 @@ def cmd_check(args, quiet: bool = False) -> int:
             print("No state logged recently. Vent or just drop a word?")
         return 0
 
-    arcs = weave(state_entries, body_entries, mind_entries, spirit_entries, intention_entries, flash_entries)
+    arcs = weave(
+        state_entries,
+        body_entries,
+        mind_entries,
+        spirit_entries,
+        intention_entries,
+        flash_entries=flash_entries,
+        decision_entries=decision_entries,
+        trigger_entries=trigger_entries,
+        goal_entries=goal_entries,
+        person_entries=person_entries,
+        resistance_entries=resistance_entries,
+    )
 
     if not quiet and state_entries:
         print(f"{_extract_tag(state_entries[-1])} lately.")
@@ -640,8 +1117,25 @@ def cmd_pattern(args) -> int:
     spirit_entries    = _recall("SPIRIT:",    args.graph, limit=14)
     intention_entries = _recall("INTENTION:", args.graph, limit=21)
     flash_entries     = _recall("FLASH:",     args.graph, limit=10)
+    decision_entries  = _recall("DECISION:",  args.graph, limit=21)
+    trigger_entries   = _recall("TRIGGER:",   args.graph, limit=21)
+    goal_entries      = _recall("GOAL:",      args.graph, limit=21)
+    person_entries    = _recall("PERSON:",    args.graph, limit=21)
+    resistance_entries = _recall("RESISTANCE:", args.graph, limit=21)
 
-    arcs = weave(state_entries, body_entries, mind_entries, spirit_entries, intention_entries, flash_entries)
+    arcs = weave(
+        state_entries,
+        body_entries,
+        mind_entries,
+        spirit_entries,
+        intention_entries,
+        flash_entries=flash_entries,
+        decision_entries=decision_entries,
+        trigger_entries=trigger_entries,
+        goal_entries=goal_entries,
+        person_entries=person_entries,
+        resistance_entries=resistance_entries,
+    )
 
     if not arcs:
         print("no patterns detected")
@@ -809,7 +1303,14 @@ def build_parser() -> argparse.ArgumentParser:
     sy.add_argument("--status", action="store_true", help="show pending count only")
 
     sub.add_parser("tulpa",    help="multi-line stream capture (tulpa protocol)")
-    sub.add_parser("eval",     help="show cassette maps-os performance trend")
+
+    evl = sub.add_parser("eval", help="show cassette maps-os tracking summary")
+    evl.add_argument("--days", type=int, default=30, help="number of days (default 30)")
+
+    wi = sub.add_parser("wins", help="show recent wins grouped by week")
+    win_scope = wi.add_mutually_exclusive_group()
+    win_scope.add_argument("--week", action="store_true", help="this week only")
+    win_scope.add_argument("--month", action="store_true", help="this month only")
 
     tr = sub.add_parser("trend",  help="show state trend chart")
     tr.add_argument("--days", type=int, default=90, help="number of days (default 90)")
@@ -822,11 +1323,21 @@ def build_parser() -> argparse.ArgumentParser:
     co.add_argument("--note", nargs="*", help="note about the connection")
     co.add_argument("--status", action="store_true", help="show connection status")
 
+    pe = sub.add_parser("person", help="show person context or init astrolog profiles")
+    pe.add_argument("name", nargs="*", help="person name")
+    pe.add_argument("--list", action="store_true", help="show known people + last contact")
+    pe.add_argument(
+        "--init-astrolog",
+        action="store_true",
+        help="create astrolog skeleton profiles for known people without one",
+    )
+
     go = sub.add_parser("goal", help="manage goals")
     go.add_argument("goal", nargs="*", help="goal text")
     go.add_argument("--due", nargs="*", help="due date")
     go.add_argument("--list", action="store_true", help="list open goals")
     go.add_argument("--done", nargs="*", help="mark goal done")
+    go.add_argument("--update", nargs="*", help="mark goal in progress")
 
     ev = sub.add_parser("events", help="show upcoming events")
     ev.add_argument("--week", action="store_true", help="this week only")
@@ -849,9 +1360,11 @@ COMMAND_MAP = {
     "sync":      cmd_sync,
     "tulpa":     cmd_tulpa,
     "eval":      cmd_eval,
+    "wins":      cmd_wins,
     "trend":     cmd_trend,
     "viz":       cmd_viz,
     "connect":  cmd_connect,
+    "person":   cmd_person,
     "goal":    cmd_goal,
     "events":  cmd_events,
 }

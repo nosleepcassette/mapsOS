@@ -84,6 +84,75 @@ Status: `met` `missed` `partial`
 
 No streaks. No scores. Missed intentions are data, not failures. Never phrase them as failures.
 
+### PERSON
+```
+PERSON: {date} | {name} | {context} | {sentiment}
+```
+
+Sentiment: `positive` `neutral` `negative`
+
+Logged automatically from vent parsing when connection language is detected, or manually via `maps connect`. Names must come from `known_people` config or follow interaction keywords — never inferred from text alone.
+
+### WIN
+```
+WIN: {date} | {note}
+```
+
+Conservative extraction — things done despite resistance. "Actually showered", "finally sent", "went anyway". Not accomplishments generally, but executive function wins specifically.
+
+### DECISION
+```
+DECISION: {date} | {framing}
+```
+
+Unresolved choice points. Logged from vent automatically. ARC 20 fires on 3+ in 7 days.
+
+### RESISTANCE
+```
+RESISTANCE: {date} | {source phrase} | {intensity}
+```
+
+Intensity: `low` `medium` `high`
+
+Avoidance signals. ARC 23 fires on recurring resistance to the same source.
+
+### TRIGGER
+```
+TRIGGER: {date} | {source} | {reaction}
+```
+
+Emotional trigger events. ARC 21 fires on 3+ from the same source in 30 days.
+
+### GOAL
+```
+GOAL: {date} | {description} | {due} | {status}
+```
+
+Due: ISO date or `none`. Status: `open` `in_progress` `done`
+
+Append-only: never update in place. A new entry with same description + updated status supersedes the old. ARC 22 fires on goals open >14 days.
+
+### EVENT
+```
+EVENT: {date} | {event_date} | {description}
+```
+
+Upcoming events extracted from vent via date resolution. Routes to nota calendar project when nota available.
+
+### DEADLINE
+```
+DEADLINE: {date} | {due_date} | {task} | {urgency}
+```
+
+Urgency: `low` `medium` `high`
+
+### FLASH
+```
+FLASH: {date} | {text}
+```
+
+Sub-threshold signal capture — no structure imposed. ARC 13 (intrusive_loop) monitors flash entries for topic recurrence.
+
 ---
 
 ## Session Start Protocol
@@ -228,6 +297,51 @@ Don't explain what the loop means. Ask the question.
 Planning language + high mind + no intentions today.
 "You're planning to plan. What's the smallest first step on THE Thing?"
 One question. Don't build out the plan with them.
+
+**`substance_coping`** *(ARC 17)*
+Substances logged during a heavy STATE (flooded/grieving/depleted).
+"Logged substances during a heavy state. Not a judgment — just visible. Pattern builds over time."
+No follow-up question. Not a check-in. Just naming. Drop it and move on.
+
+**`avoidance_language`** *(ARC 18)*
+2+ avoidance phrases in recent vent notes.
+"Avoidance language showing up [N] times. What's the one thing you're actually circling?"
+One question. Not a list of the avoidance phrases.
+
+**`habit_candidate`** *(ARC 19)*
+Intention logged 5+ times at ≥60% met rate.
+"'[intention]' logged [N] times, met [M]/[N]. Worth adding to harsh as a habit?"
+User decides. Don't push. Just surface the signal.
+
+**`decision_pile`** *(ARC 20)*
+3+ unresolved DECISION entries in 7 days.
+"[N] unresolved decision points this week. Want to revisit any of them?"
+Mention the oldest one by name if available. Not all of them.
+
+**`trigger_pattern`** *(ARC 21)*
+3+ TRIGGER entries from same source in 30 days.
+"[N] triggers from [source]. That's a pattern worth knowing."
+Don't explain the pattern. Don't suggest action. Name it and stop.
+
+**`goal_stall`** *(ARC 22)*
+GOAL open >14 days.
+"'[goal]' has been open for [N] days. Still relevant?"
+One goal at a time. Oldest first. Yes/no question only.
+
+**`resistance_pattern`** *(ARC 23 — Phase 2.6)*
+3+ RESISTANCE entries about same source in 14 days.
+"You've been resisting [X] for [N] days. Worth naming why?"
+Don't offer solutions to the resistance. Naming is the move.
+
+**`negative_interaction_pattern`** *(ARC 24 — Phase 2.6)*
+3+ PERSON entries for same name with sentiment negative in 30 days.
+"[Name] is consistently showing up as draining. Pattern worth noticing."
+Don't analyze the relationship. Don't suggest action. Name the pattern only.
+
+**`exec_dysfunction`** *(ARC 25 — Phase 2.6)*
+High resistance + stalled goal + low/dysregulated STATE all present simultaneously.
+"Resistance is high and [goal] has stalled. Exec dysfunction pattern. What's the one thing that doesn't require starting?"
+This is not a productivity nudge. It's a recognition. The question is about activation cost, not output.
 
 ### Behavioral-Only Arcs
 
@@ -403,13 +517,23 @@ maps can check performance trend with `maps eval`.
 ## Quick Reference
 
 ```bash
-# garden format
-garden remember 'STATE: 2026-04-09 | thriving | ...' --graph cassette
-garden remember 'BODY: 2026-04-09 | sleep | none | ...' --graph cassette
-garden remember 'MIND: 2026-04-09 | flow | high | ...' --graph cassette
-garden remember 'SPIRIT: 2026-04-09 | connection | rising | ...' --graph cassette
-garden remember 'INTENTION: water | missed | 2026-04-09 | ...' --graph cassette
-garden remember 'FLASH: 2026-04-09 | ...' --graph cassette
+# garden format — core tracks
+garden remember 'STATE: 2026-04-10 | thriving | ...' --graph cassette
+garden remember 'BODY: 2026-04-10 | sleep | none | ...' --graph cassette
+garden remember 'MIND: 2026-04-10 | flow | high | ...' --graph cassette
+garden remember 'SPIRIT: 2026-04-10 | connection | rising | ...' --graph cassette
+garden remember 'INTENTION: water | missed | 2026-04-10 | ...' --graph cassette
+garden remember 'FLASH: 2026-04-10 | ...' --graph cassette
+
+# garden format — extended tracks
+garden remember 'WIN: 2026-04-10 | actually showed up anyway' --graph cassette
+garden remember 'PERSON: 2026-04-10 | name | context | positive' --graph cassette
+garden remember 'DECISION: 2026-04-10 | framing of the dilemma' --graph cassette
+garden remember 'RESISTANCE: 2026-04-10 | source phrase | high' --graph cassette
+garden remember 'TRIGGER: 2026-04-10 | source | reaction' --graph cassette
+garden remember 'GOAL: 2026-04-10 | description | none | open' --graph cassette
+garden remember 'EVENT: 2026-04-10 | 2026-04-14 | description' --graph cassette
+garden remember 'DEADLINE: 2026-04-10 | 2026-04-12 | task | high' --graph cassette
 
 # recall
 garden recall 'STATE:' --graph cassette --limit 7
@@ -418,13 +542,25 @@ garden recall 'MIND:' --graph cassette --limit 7
 garden recall 'SPIRIT:' --graph cassette --limit 7
 garden recall 'INTENTION:' --graph cassette --limit 14
 garden recall 'FLASH:' --graph cassette --limit 10
+garden recall 'GOAL:' --graph cassette --limit 20
+garden recall 'PERSON:' --graph cassette --limit 20
 
 # CLI
-maps check           # session start
-maps pattern         # full arc output
-maps survival        # survival mode status
-maps sync --status   # pending entries count
-maps eval            # cassette performance trend
+maps check                          # session start
+maps pattern                        # full arc output
+maps survival                       # survival mode status
+maps sync --status                  # pending entries count
+maps eval                           # cassette performance trend
+maps wins [--week] [--month]        # surface WIN entries
+maps connect <name> [--note text]   # log connection
+maps connect --status               # last connection per person
+maps goal <text> [--due date]       # log a goal
+maps goal --list                    # open goals
+maps goal --done <phrase>           # mark done
+maps goal --update <phrase>         # mark in_progress
+maps events [--week]                # upcoming events
+maps trend [--days N]               # STATE trend visualization
+maps viz                            # body/state/arc dashboard
 ```
 
 ---

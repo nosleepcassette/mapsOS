@@ -1,9 +1,19 @@
-# maps-os: Agent Build Guide — Phase 2.2–2.5
+# maps-os: Agent Build Guide — Phase 2.7
 **Date:** 2026-04-10
 **For:** codex / opencode agent
 **Repo:** `/Users/maps/dev/hermes-maps-os/`
 
-Read this whole document before starting. Each stage is self-contained. Do not start stage N+1 until stage N passes its tests. Run the existing test suite after each stage: `cd /Users/maps/dev/hermes-maps-os && python -m pytest tests/ -q`.
+Read this whole document before starting. Do not start stage N+1 until stage N passes its tests. Run the existing test suite after each stage: `cd /Users/maps/dev/hermes-maps-os && python -m pytest tests/ -q`.
+
+**Current test state: 196 passing, 0 failing.**
+
+## ✅ Stage 0 — COMPLETE (2026-04-10)
+
+7 correctness bugs fixed (EVENT/DEADLINE wiring, goal_stall field index, trigger/event patterns, dead code, date_resolver duplicate, viz body panel date-blind). ARC 15 planning_hyperfocus fixed. CLI schema fixes for `maps goal`, `maps events`, `maps check`, `maps pattern`. Tests: `tests/test_phase26_fixes.py`, `tests/test_cli_commands.py`.
+
+## ✅ Stage 6 — COMPLETE (2026-04-10)
+
+`person_context()` and `person_birth_hint()` added to `environments/maps_os_config.py`. `maps person <name>`, `maps person --list`, `maps person --init-astrolog` implemented in `bin/maps`. 16 astrolog skeleton profiles created at `~/.hermes/astrolog/`. Tests in `tests/test_cli_commands.py`.
 
 ---
 
@@ -12,312 +22,260 @@ Read this whole document before starting. Each stage is self-contained. Do not s
 ```
 environments/
   vent_parser.py      # Entry dataclass, parse_vent(), all _extract_*() functions
-  pattern_weaver.py   # Arc functions (ARC 1–19), weave()
+  pattern_weaver.py   # Arc functions (ARC 1–22), weave()
   nota_bridge.py      # nota action routing
-  maps_os_config.py   # (may not exist yet) config loader for ~/.maps_os_config.yaml
+  maps_os_config.py   # config loader for ~/.maps_os_config.yaml
   tui.py              # Rich TUI — dashboard, survival mode, input screens
   local_store.py      # SQLite offline queue
+  viz.py              # Rich-only visualizations: render_trend, render_viz
+  date_resolver.py    # Relative date → ISO date conversion
 bin/
   maps                # CLI entry point — all top-level commands live here
 tests/
-  test_new_arcs.py    # Arcs 17–19 tests — follow this pattern for new arcs
-  test_chat_tui_commands.py
-  test_adapter_trigger_policy.py
+  test_new_arcs.py    # Arcs 17–22 tests — follow this pattern for new arcs
 ```
 
 **Schema format:** all garden entries use `TRACK: YYYY-MM-DD | field | field | note`.
 **Garden writes:** `garden remember '{entry}' --graph cassette` — always short graph ID.
-**Arc numbering:** next available is ARC 20. Document each arc in the function docstring.
+**Arc numbering:** next available is ARC 23. Document each arc in the function docstring.
 **File header on new files:** `# maps · cassette.help · MIT`
 **Non-TTY safety:** all new commands must work when stdout is not a terminal.
 
 ---
 
-## Stage 1 — Enhanced vent parsing
+## ✅ Stage 1 — COMPLETE (2026-04-10)
 
-**New entry types and schema:**
+### 1a. `maps wins [--week] [--month]`
 
-```
-PERSON: YYYY-MM-DD | name | context | sentiment
-DECISION: YYYY-MM-DD | framing | options
-RESISTANCE: YYYY-MM-DD | source | intensity(low/medium/high)
-TRIGGER: YYYY-MM-DD | source | reaction
-GOAL: YYYY-MM-DD | description | due(YYYY-MM-DD or none) | status(open/in_progress/done)
-```
-
-**GOAL** is the new type not in MAPS_OS_FEATURE_SPEC.md. Include it in all Stage 1 work.
-
-### 1a. Config loader (`environments/maps_os_config.py`)
-
-Create if not present. Loads `~/.maps_os_config.yaml`. Provides:
-
-```python
-def load_config() -> dict:
-    """Returns config dict. Returns {} if file missing — never raises."""
-
-def known_people() -> list[str]:
-    """Returns config.get('known_people', []) lowercased."""
-```
-
-### 1b. `environments/vent_parser.py`
-
-Add to `Entry.to_garden()`:
-```python
-if self.track == "PERSON":
-    return f"PERSON: {self.date} | {self.note}"   # note = "name | context | sentiment"
-if self.track == "DECISION":
-    return f"DECISION: {self.date} | {self.note}"
-if self.track == "RESISTANCE":
-    return f"RESISTANCE: {self.date} | {self.note}"
-if self.track == "TRIGGER":
-    return f"TRIGGER: {self.date} | {self.note}"
-if self.track == "GOAL":
-    return f"GOAL: {self.date} | {self.note}"
-```
-
-Add extraction functions:
-
-**`_extract_person_entries(text, date)`**
-- Keywords: "talked to", "called", "texted", "plans with", "saw", "reached out to"
-- Also match names from `known_people()` config list (case-insensitive)
-- Infer sentiment: positive if text near the match contains "good", "great", "loved", "nice", "fun"; negative if "hard", "difficult", "drained", "upset"; else neutral
-- `note` = `"name | context phrase | sentiment"`
-
-**`_extract_decision_entries(text, date)`**
-- Triggers: "i don't know if i should", "should i", "can't decide between", "not sure whether to", "weighing"
-- `note` = short phrase capturing the dilemma
-
-**`_extract_resistance_entries(text, date)`**
-- Triggers: "i don't want to", "i keep avoiding", "can't bring myself to", "dreading", "the thought of", "can't start"
-- Intensity: "dreading"/"can't face" = high; "don't want to"/"not feeling it" = medium; "maybe later" = low
-- `note` = `"source phrase | intensity"`
-
-**`_extract_trigger_entries(text, date)`**
-- Triggers: "because [x] happened", "[person] said", "when i saw", "triggered by", "set off by"
-- `note` = `"source | reaction"`
-
-**`_extract_goal_entries(text, date)`**
-- Triggers: "i want to", "i'd like to", "my goal is", "planning to", "hoping to", "i need to make sure", "i should really"
-- Extract goal text as the phrase following the trigger up to end of sentence
-- Default status = `open`, due = `none`
-- `note` = `"description | none | open"`
-
-**Update `parse_vent()`** — append all new entry types after existing dedup logic. PERSON, DECISION, RESISTANCE, TRIGGER, GOAL are not deduped (each instance is meaningful). Pattern: same as WIN.
-
-### 1c. Enhanced body signal detection (`environments/vent_parser.py`)
-
-In `_infer_body_status` (sleep inference), expand to distinguish:
-- `broken`: "kept waking", "woke up at 3", "broken sleep", "woke up in the night"
-- `restless`: "couldn't fall asleep", "tossed and turned", "can't sleep"
-- `deep`: "slept through", "actually rested", "best sleep in", "finally slept"
-- `overslept`: "slept too long", "slept 12 hours", "can't get up", "slept all day"
-
-Existing values (`none`, `poor`, `ok`) stay. New values slot in between — no breaking changes to existing tests.
-
-Add to `_BODY_SIGNALS` (pain location keywords):
-- `"back hurts"`, `"neck stiff"`, `"eye strain"`, `"tension headache"`, `"shoulder pain"`, `"jaw tight"`
-
-Add substance context patterns:
-- Quantities: `"on my (second|third|fourth) coffee"`, `"(second|third) glass"`, `"another [drink]"`
-- Timing: `"first thing in the morning"` (substance + timing = flag for substance_coping arc)
-
-### 1d. New arcs (`environments/pattern_weaver.py`)
-
-**ARC 20 — decision_pile (`_arc_decision_pile`)**
-- Input: entries of track `DECISION`
-- Fires: 3+ DECISION entries in last 7 days
-- Message: `"you had {n} unresolved decision points this week. want to revisit any of them?"`
-- Surface oldest first in message
-
-**ARC 21 — trigger_pattern (`_arc_trigger_pattern`)**
-- Input: entries of track `TRIGGER`
-- Fires: 3+ TRIGGER entries with same source in last 30 days
-- Message: `"you've logged {n} triggers from {source}. that's a pattern worth knowing."`
-
-**ARC 22 — goal_stall (`_arc_goal_stall`)**
-- Input: entries of track `GOAL` with status `open`
-- Fires: any GOAL entry older than 14 days with no follow-up entry updating it to `in_progress` or `done`
-- Message: `"'{goal}' has been open for {n} days. still relevant?"`
-- Surface one at a time (oldest first)
-
-Add all three to `weave()` — same pattern as existing arcs.
-
-### 1e. Tests
-
-Add to `tests/test_new_arcs.py`:
-- ≥3 tests each for ARC 20, 21, 22
-- ≥2 tests for each new `_extract_*` function (match + no-match)
-- ≥2 tests for GOAL extraction
-
----
-
-## Stage 2 — Visualization
-
-All rendering: Rich only. No matplotlib, plotext, or external charting libs.
-
-### 2a. `environments/viz.py` (new)
-
-**`render_trend(entries, days=90)`**
-- Input: list of STATE entries (filtered to last N days)
-- Output: Rich `Text` block — Unicode bar chart
-- One row per STATE tag seen in data (depleted/heavy/mixed/stable/thriving/manic)
-- Each row: tag name (padded) + filled/empty block characters (`█`/`░`) per day
-- Color per tag: use `STATE_COLORS` from tui.py (import or duplicate constants)
-- Bottom: month labels aligned to columns
-- Arc event annotation line: pull any Arc fires from entries if metadata present
-
-**`render_viz(body_entries, state_entries, arc_history)`**
-- Panel 1: state sparkline — last 14 days, one colored char per day
-- Panel 2: body presence — last 7 days, sleep/hunger/pain/movement/energy rows, `■`/`·` per day
-- Panel 3: arc frequency — which arcs fired most in last 30 days, Rich column bar
-
-### 2b. New commands in `bin/maps`
-
-**`maps trend [--days N]`**
-- Query garden for STATE entries: `garden recall-sparql 'STATE:' --graph cassette --limit 200`
-- Parse into list of (date, tag) pairs
-- Pass to `render_trend()`, print with Rich
-- Flags: `--days 30` / `--days 90` / `--days 365`; default 90. `--full` = all-time.
-
-**`maps viz`**
-- Query garden for BODY + STATE entries (last 30 days)
-- Render with `render_viz()`, print with Rich
-
-### 2c. TUI key bindings (`environments/tui.py`)
-
-In `_draw_dashboard()`, add to the key bar:
-```
-  \[t]rend  \[V]iz
-```
-(note capital V to avoid clash with lowercase vent `\[v]`)
-
-In the main input loop (where keys are dispatched), add:
-- `t` → call `render_trend()` and print inline, then wait for keypress to return
-- `V` → call `render_viz()` and print inline, then wait for keypress to return
-
----
-
-## Stage 3 — Social tracking
-
-### 3a. `maps connect <person> [--note text]` (`bin/maps`)
+Query garden for WIN entries, display grouped by week.
 
 ```bash
-maps connect emma --note "good call, plans for friday"
-maps connect --status
+maps wins           # all wins, most recent 30 days
+maps wins --week    # this week only
+maps wins --month   # this month only
 ```
 
-`connect <person>` writes two entries to garden:
-- `SPIRIT: {date} | connection | rising | with {name}: {note}`
-- `PERSON: {date} | {name} | {note} | positive`
+**Implementation:**
+- Query: `recall_resilient("WIN:", graph=args.graph, limit=50)`
+- Parse each entry: `WIN: date | note`
+- Group by ISO week (`date.isocalendar().week`)
+- Display with Rich: week header, bulleted win notes under it
+- No wins in range: `"no wins logged in this period."`
+- Non-TTY safe: plain text output, no Rich Panel required
 
-`connect --status`:
-- Query garden for all PERSON entries, group by name, find most recent per person
-- Output: `{name}: last connection {date} ({N} days ago)` — one line per person
-- Pull known people from `maps_os_config.known_people()` as the base list; supplement with any names found in PERSON entries
+**Tests:** ≥2 smoke tests (no garden required — test the grouping/parsing logic directly with mock entries)
 
-### 3b. Arc update (`environments/pattern_weaver.py`)
+### 1b. `maps goal --update <phrase>`
 
-In `_arc_isolation_creep()`:
-- If PERSON entries are available and a name can be identified, use it: `"you haven't connected with {name} in {n} days"` instead of the generic form
-- Fall back to generic if no PERSON data
+Update a matching GOAL's status to `in_progress`. The GOAL schema includes three states (`open` / `in_progress` / `done`) but `--update` was never implemented.
+
+```bash
+maps goal --update "learn swedish"
+```
+
+**Implementation:**
+- Same pattern as `maps goal --done`: query GOAL entries, find closest match to phrase
+- Write a new GOAL entry: same description + status `in_progress` + today's date
+- Print: `  ↻ goal updated: in_progress`
+- Garden is append-only: never modify existing entries
+
+### 1c. `maps eval`
+
+`maps eval` is referenced in the CLI docstring and AGENT_GUIDE.md quick reference but not implemented. Implement it.
+
+```bash
+maps eval           # cassette performance trend (last 30 days)
+maps eval --days 7  # shorter window
+```
+
+**Output:**
+- Intention met rate: count met/missed/partial INTENTION entries for the period, compute rate
+- STATE distribution: count of each STATE tag
+- Arc fire count: query arc history if available (or note "arc history not persisted yet")
+- Format: plain Rich table, non-TTY safe
+
+**Query:** `recall_resilient("INTENTION:", limit=60)` + `recall_resilient("STATE:", limit=30)`
+
+**Tests:** ≥2 smoke tests for the parsing/rate computation logic
 
 ---
 
-## Stage 4 — Calendar / Event integration
+## ✅ Stage 2 — COMPLETE (2026-04-10)
 
-### 4a. `environments/date_resolver.py` (new)
+Add to `environments/pattern_weaver.py`. Add all new arcs to `weave()`.
+
+### ARC 23 — resistance_pattern (`_arc_resistance_pattern`)
+
+- Input: entries of track `RESISTANCE`
+- Fires: 3+ RESISTANCE entries mentioning the same source phrase within 14 days
+- Matching: extract the source phrase (text before the ` | intensity` separator), lowercase, check if any two entries share a word ≥5 chars (rough dedup — not exact match required)
+- Message: `"you've been resisting {source} for {n} days. worth naming why?"`
+- Severity: `"insight"`
+- Surface: most-repeated source, oldest first for the date count
+
+Add to `weave()` signature: already receives `decision_entries` etc. RESISTANCE entries need to be added as a parameter if not already present.
+
+**Tests:** ≥3 tests in `tests/test_new_arcs.py`
+- fires on 3+ resistance entries with same-source word match
+- does not fire on 2 resistance entries
+- does not fire when sources are unrelated
+
+### ARC 24 — negative_interaction_pattern (`_arc_negative_interaction_pattern`)
+
+- Input: entries of track `PERSON`
+- Fires: 3+ PERSON entries for the same name with sentiment `negative` within 30 days
+- Name matching: extract name from `PERSON: date | name | context | sentiment` format (parts[1] after split by `|`)
+- Message: `"{name} is consistently showing up as draining. pattern worth noticing."`
+- Severity: `"insight"`
+- Surface one arc per most-frequent negative-sentiment person
+
+**Tests:** ≥3 tests
+- fires when same person has 3+ negative entries in 30 days
+- does not fire if only 2 negative entries
+- does not fire when sentiment is neutral even if person logged many times
+
+---
+
+## ✅ Stage 3 — COMPLETE (2026-04-10)
+
+**Problem:** Insight arcs can fire on every `maps check` call as long as conditions persist. This creates alert fatigue. A manic spike that lasts 3 days will trigger `manic_spike` three sessions in a row.
+
+**Implementation:**
+
+Add `environments/arc_cooldown.py` (new file):
 
 ```python
-def resolve_date(text: str, today: date) -> Optional[date]:
-    """Convert relative date phrases to ISO date. Returns None if unresolvable."""
+# maps · cassette.help · MIT
+"""
+arc_cooldown.py — Per-arc suppression tracking.
+
+Cooldown state is persisted to ~/.maps_os_cooldown.json.
+An arc that fires is suppressed for its cooldown window (in days).
+"""
 ```
 
-Handles: "tomorrow", "today", "monday"–"sunday" (next occurrence), "next week", "next [weekday]", "in N days/weeks".
+Public API:
+```python
+def cooldown_path() -> Path:
+    """Returns ~/.maps_os_cooldown.json"""
 
-### 4b. New entry types in `environments/vent_parser.py`
+def load_cooldowns() -> dict:
+    """Load {arc_name: last_fired_iso_date}. Returns {} on missing file."""
 
-```
-EVENT: YYYY-MM-DD | event_date | description
-DEADLINE: YYYY-MM-DD | due_date | task | urgency(low/medium/high)
-```
+def save_cooldowns(cooldowns: dict) -> None:
+    """Persist cooldown state. Never raises."""
 
-**`_extract_event_entries(text, date, today)`**
-- Triggers: "therapy on [day]", "have [something] on [day]", "that thing [day]", "appointment [day]"
-- Use `resolve_date()` for event_date
-- `note` = `"resolved_date | description"`
+def is_suppressed(arc_name: str, cooldowns: dict, cooldown_days: int) -> bool:
+    """Returns True if arc fired within cooldown_days."""
 
-**`_extract_deadline_entries(text, date, today)`**
-- Triggers: "due by", "before [date]", "deadline", "need to finish by", "submit by"
-- Urgency: "urgent"/"asap"/"today" = high; explicit near date (≤3 days) = high; 4–7 days = medium; else low
-- Use `resolve_date()` for due_date
-
-**Route to nota** (in `nota_bridge.py` or `bin/maps`):
-- After vent parsing, for each EVENT/DEADLINE entry, call:
-  `nota add "{description}" --project calendar --due {date}` (if nota available)
-- Wrap in try/except — nota routing is always best-effort
-
-### 4c. `maps goal` command (`bin/maps`)
-
-```bash
-maps goal "learn enough swedish to hold a conversation"
-maps goal "finish the album demo" --due 2026-06-01
-maps goal --list          # show open goals from garden
-maps goal --done "phrase"  # mark matching goal done
+def record_fired(arc_name: str, cooldowns: dict) -> dict:
+    """Returns updated cooldowns dict with arc_name set to today."""
 ```
 
-`goal <text> [--due date]`:
-- Writes `GOAL: {date} | {text} | {due_or_none} | open` to garden
-- If `--due` given, resolve date via `resolve_date()` if relative
-
-`goal --list`:
-- Query garden for GOAL entries with status `open`
-- Display: `{description}  [due: {date}]  ({days_open} days open)`
-
-`goal --done <phrase>`:
-- Query GOAL entries, find closest match to phrase
-- Write a new GOAL entry with same description but status `done` and today's date
-
-### 4d. `maps events` command (`bin/maps`)
-
-```bash
-maps events          # upcoming events
-maps events --week   # this week only
+Default cooldown windows (in `arc_cooldown.py`):
+```python
+ARC_COOLDOWNS: dict[str, int] = {
+    "manic_spike": 1,         # alert — allow daily
+    "body_neglect": 1,
+    "isolation_creep": 2,
+    "state_dip_holding": 0,   # never suppress (survival trigger)
+    "spirit_rising": 3,
+    "post_manic_drop": 2,
+    "thriving_streak": 3,
+    "productivity_spiral": 2,
+    "catastrophizing_spike": 1,
+    "planning_hyperfocus": 1,
+    "substance_coping": 3,
+    "avoidance_language": 2,
+    "decision_pile": 3,
+    "trigger_pattern": 7,
+    "goal_stall": 7,
+    "resistance_pattern": 5,
+    "negative_interaction_pattern": 7,
+    # default for unlisted arcs: 0 (never suppress)
+}
 ```
 
-Query garden for EVENT: entries, filter by event_date >= today, sort ascending, display with Rich.
+**Integration in `weave()`:**
 
-### 4e. Tests
+Add optional `apply_cooldown: bool = True` parameter. When `True`:
+1. Load cooldowns at the start of `weave()`
+2. After running all detectors, filter result arcs: remove any arc whose name is in cooldowns and `is_suppressed(arc.name, cooldowns, ARC_COOLDOWNS.get(arc.name, 0))`
+3. For each arc that survives the filter, call `record_fired(arc.name, cooldowns)`
+4. Save updated cooldowns
 
-- ≥3 tests for `resolve_date()` (relative → ISO)
-- ≥2 tests for EVENT extraction
-- ≥2 tests for DEADLINE extraction
-- ≥2 tests for `maps goal` command (smoke tests via subprocess or direct function call)
+Alert arcs with `severity == "survival"` are never suppressed regardless of cooldown state.
+
+**Tests:** ≥3 tests
+- arc not in cooldowns: fires
+- arc in cooldowns but cooldown expired: fires
+- arc in cooldowns within window: suppressed
+- survival arcs never suppressed
 
 ---
 
-## GOAL schema reference
+## ✅ Stage 4 — COMPLETE (2026-04-10)
 
-```
-GOAL: YYYY-MM-DD | description | due(YYYY-MM-DD or none) | status(open/in_progress/done)
-```
+### ARC 25 — exec_dysfunction (`_arc_exec_dysfunction`)
 
-- `open` — logged, not started
-- `in_progress` — explicitly updated via `maps goal --update`
-- `done` — completed via `maps goal --done`
+**Rationale:** The most debilitating ADHD/dysregulation pattern is when resistance + goal stall + low state co-occur. No single arc catches this combination. It needs its own detector.
 
-Goals are append-only in garden — never update in place. A new entry with same description + new status supersedes the old. `--list` deduplicates by description and takes the most recent status.
+- Input: `state_entries`, `resistance_entries`, `goal_entries`
+- Fires when ALL of:
+  - Current STATE in (`depleted`, `flooded`, `manic`)
+  - ≥1 RESISTANCE entry with intensity `high` in last 7 days
+  - ≥1 GOAL with status `open` older than 14 days
+- Message: `"resistance is high and {goal} has been stalled. exec dysfunction pattern. what's the one thing that doesn't require starting?"`
+- Severity: `"insight"`
+- Surface the oldest stalled goal in the message
+- Does not fire in survival mode (state == `grieving` or `surviving` counts as survival, not exec dysfunction)
+
+Add to `weave()` after existing insight detectors.
+
+**Tests:** ≥4 tests
+- all three conditions met → fires
+- state is stable (not depleted/flooded/manic) → does not fire
+- resistance is low intensity → does not fire
+- goal is recent (< 14 days) → does not fire
+
+---
+
+## Stage 4e — Tests
+
+After each stage, run full test suite. Confirm:
+- 174 originally passing tests still pass
+- New tests added for each stage as noted above
+- `python -m pytest tests/ -q` exits 0
+
+---
+
+## Stage 5 — Smoke tests for existing visualization (✅ partially done)
+
+`tests/test_phase26_fixes.py` includes one viz smoke test (`test_render_viz_body_panel_tracks_presence_per_day`). If additional coverage is needed:
+
+**`render_trend()`** — call with ≥5 STATE dict entries spanning 3 different tags. Assert result is not None and contains `█`.
+
+Use synthetic entry dicts: `{"content": "STATE: 2026-04-01 | thriving | test"}`.
+
+---
+
+## Out of scope for Phase 2.7
+
+**nota task deduplication** — explicitly deferred. Do not add deduplication logic to `nota_bridge.py`.
+
+**Priority 4.7 architecture items** — deferred to Phase 2.8. Do not implement: shared entry codec, canonical alias resolution, real date-window filtering, arc evidence persistence, safe garden subprocess wrapper, `maps doctor`, `maps parse --dry-run`, config schema v2. The current Stages 1-4 are clean feature additions that don't require architecture refactors first.
 
 ---
 
 ## Rules for the implementing agent
 
-- Run `python -m pytest tests/ -q` after each stage. All existing tests must stay green.
-- Do not modify the garden write format for existing entry types (STATE, BODY, MIND, SPIRIT, INTENTION, WIN, FLASH).
+- Run `python -m pytest tests/ -q` after each stage. All existing green tests must stay green.
+- Do not modify the garden write format for existing entry types.
 - All new `_extract_*` functions: return `[]` on no match, never raise.
 - All new Arc functions: return `None` or `[]` on insufficient data, never raise.
-- Config (`~/.maps_os_config.yaml`) is always optional — missing file = degraded gracefully, never crashed.
+- Config (`~/.maps_os_config.yaml`) is always optional — missing file = degrades gracefully.
 - nota routing is always wrapped in try/except and gated on `nota_available()`.
-- New optional deps (aiohttp, pycrdt) document in requirements.txt as `# optional: <feature>`.
+- Cooldown file missing or malformed: degrade gracefully, do not raise.
 - No hardcoded names, people, or personal data anywhere in source.
 
 ---

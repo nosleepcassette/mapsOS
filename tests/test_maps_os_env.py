@@ -197,11 +197,11 @@ class TestVentParser:
 
 class TestPatternWeaver:
     def test_returns_list(self):
-        arcs = weave([], [], [], [], [])
+        arcs = weave([], [], [], [], [], apply_cooldown=False)
         assert isinstance(arcs, list)
 
     def test_no_arcs_when_no_data(self):
-        arcs = weave([], [], [], [], [])
+        arcs = weave([], [], [], [], [], apply_cooldown=False)
         assert arcs == []
 
     def test_survival_trigger_two_depleted(self):
@@ -224,7 +224,7 @@ class TestPatternWeaver:
         states = [_state_entry("manic")]
         body = [_body_entry("sleep", "none")]
         mind = [_mind_entry("flow", "high")]
-        arcs = weave(states, body, mind, [], [])
+        arcs = weave(states, body, mind, [], [], apply_cooldown=False)
         names = [a.name for a in arcs]
         assert "manic_spike" in names
 
@@ -233,7 +233,7 @@ class TestPatternWeaver:
         states = [_state_entry("manic")]
         body = [_body_entry("sleep", "solid")]
         mind = [_mind_entry("flow", "high")]
-        arcs = weave(states, body, mind, [], [])
+        arcs = weave(states, body, mind, [], [], apply_cooldown=False)
         names = [a.name for a in arcs]
         assert "manic_spike" not in names
 
@@ -243,7 +243,7 @@ class TestPatternWeaver:
             _spirit_entry("isolation", "high", "2026-04-10"),
             _spirit_entry("isolation", "high", "2026-04-11"),
         ]
-        arcs = weave([], [], [], spirit, [])
+        arcs = weave([], [], [], spirit, [], apply_cooldown=False)
         names = [a.name for a in arcs]
         assert "isolation_creep" in names
 
@@ -253,7 +253,7 @@ class TestPatternWeaver:
             _body_entry("movement", "none"),
         ]
         mind = [_mind_entry("flow", "high")]
-        arcs = weave([], body, mind, [], [])
+        arcs = weave([], body, mind, [], [], apply_cooldown=False)
         names = [a.name for a in arcs]
         assert "body_neglect" in names
 
@@ -261,7 +261,7 @@ class TestPatternWeaver:
         # Hungry but not in flow — no body neglect arc
         body = [_body_entry("hunger", "starving")]
         mind = [_mind_entry("focus", "low")]
-        arcs = weave([], body, mind, [], [])
+        arcs = weave([], body, mind, [], [], apply_cooldown=False)
         names = [a.name for a in arcs]
         assert "body_neglect" not in names
 
@@ -271,7 +271,7 @@ class TestPatternWeaver:
             _state_entry("depleted", "2026-04-10"),
             _state_entry("grieving", "2026-04-11"),
         ]
-        arcs = weave(states, [], [], [], [])
+        arcs = weave(states, [], [], [], [], apply_cooldown=False)
         names = [a.name for a in arcs]
         assert "state_dip_holding" in names
 
@@ -281,7 +281,7 @@ class TestPatternWeaver:
             _state_entry("manic", "2026-04-08"),
             _state_entry("depleted", "2026-04-09"),
         ]
-        arcs = weave(states, [], [], [], [])
+        arcs = weave(states, [], [], [], [], apply_cooldown=False)
         names = [a.name for a in arcs]
         assert "post_manic_drop" in names
 
@@ -291,14 +291,14 @@ class TestPatternWeaver:
             _state_entry("thriving", "2026-04-08"),
             _state_entry("thriving", "2026-04-09"),
         ]
-        arcs = weave(states, [], [], [], [])
+        arcs = weave(states, [], [], [], [], apply_cooldown=False)
         names = [a.name for a in arcs]
         assert "thriving_streak" in names
 
     def test_spirit_rising_insight(self):
         states = [_state_entry("depleted")]
         spirit = [_spirit_entry("connection", "rising")]
-        arcs = weave(states, [], [], spirit, [])
+        arcs = weave(states, [], [], spirit, [], apply_cooldown=False)
         names = [a.name for a in arcs]
         assert "spirit_rising" in names
 
@@ -306,7 +306,7 @@ class TestPatternWeaver:
         intentions = [
             _intention_entry("water", "missed", f"2026-04-0{i}") for i in range(1, 6)
         ]
-        arcs = weave([], [], [], [], intentions)
+        arcs = weave([], [], [], [], intentions, apply_cooldown=False)
         names = [a.name for a in arcs]
         assert "intention_miss_pattern" in names
 
@@ -315,7 +315,7 @@ class TestPatternWeaver:
         intentions = [
             _intention_entry("water", "missed", f"2026-04-0{i}") for i in range(1, 4)
         ]
-        arcs = weave([], [], [], [], intentions)
+        arcs = weave([], [], [], [], intentions, apply_cooldown=False)
         names = [a.name for a in arcs]
         assert "intention_miss_pattern" not in names
 
@@ -329,7 +329,7 @@ class TestPatternWeaver:
             _spirit_entry("isolation", "high", "2026-04-10"),
             _spirit_entry("isolation", "high", "2026-04-11"),
         ]
-        arcs = weave(states, body, mind, spirit, [])
+        arcs = weave(states, body, mind, spirit, [], apply_cooldown=False)
         alerts = [a for a in arcs if a.severity == "alert"]
         assert len(alerts) == 1
 
@@ -339,7 +339,7 @@ class TestPatternWeaver:
             _state_entry("thriving", "2026-04-08"),
             _state_entry("thriving", "2026-04-09"),
         ]
-        arcs = weave(states, [], [], [], [])
+        arcs = weave(states, [], [], [], [], apply_cooldown=False)
         for arc in arcs:
             assert len(arc.message) > 0 or arc.severity == "survival"
 
