@@ -414,8 +414,9 @@ Check patterns **after every vent** and **at session start**. Pull the last 7–
 ### Data Pulls
 
 ```bash
-maps check      # session start — pulls recent STATE, BODY, INTENTION + runs arc check
-maps pattern    # full pattern weaver output across all tracks
+maps check         # session start — pulls recent STATE, BODY, INTENTION + runs arc check
+maps check --role  # same + agent mode guidance block (STATE → mode, energy tier, arc handoffs)
+maps pattern       # full pattern weaver output across all tracks (also runs cycle_meta)
 ```
 
 ### Arc Detection Rules
@@ -571,6 +572,37 @@ Nudge, not directive. If declined, drop it for 14 days.
 
 ---
 
+**ARC 26 — Cycle Meta** *(code — alert, 7-day cooldown)*
+```
+IF manic/depleted alternations ≥ 3 in last 60 days
+→ ALERT: "Structural cycling pattern across 60 days — manic/depleted alternations are not random."
+```
+
+This is a longer-scale structural signal — distinct from a single post-manic drop. Fires from `maps pattern` (not `maps check`, which only reads recent entries). 7-day cooldown.
+
+**Response when this fires:**
+- Name it as structural, not situational
+- Don't troubleshoot the current state — address the cycle
+- Mood stabilization, sleep as the primary lever, pacing as prevention — not productivity
+- No "you should see someone" language unless the user explicitly asks
+
+---
+
+### Arc Frequency Threshold
+
+Any insight-severity arc that fires **3+ times within 14 days** auto-upgrades to alert severity.
+
+Label format: `[recurring × N in 14 days] {original message}`
+
+**What this means behaviorally:**
+- A one-off pattern detection is signal. The same arc firing repeatedly means something structural is happening.
+- Treat upgraded arcs with the same weight as native alerts — don't downgrade them in your response because you know the original arc was insight-level.
+- The label is surfaced in the arc output; no extra commentary needed unless the pattern warrants it.
+
+Fire history is tracked in `~/.maps_os_arc_history.json` (separate from cooldown state).
+
+---
+
 **WIN Recognition** *(behavioral)*
 ```
 IF vent parse produces WIN: entry
@@ -667,12 +699,14 @@ On every session start, run this check:
 
 1. **Run session start check**
    ```bash
-   maps check   # pulls recent STATE, checks survival trigger, runs arc detection
+   maps check --role   # pulls recent STATE, checks survival trigger, runs arc detection, outputs mode guidance
    ```
+   `--role` adds: current STATE → suggested mode, energy tier, arcs with mode implications, refs to load.
+   Use plain `maps check` if your agent doesn't have a mode/persona system.
 
 2. **Check for survival mode trigger** — `maps check` surfaces this; if active, reduce to survival protocol before anything else.
 
-3. **If not survival mode:** context is in `maps check` output — recent state, body signals, active arcs.
+3. **If not survival mode:** context is in `maps check` output — recent state, body signals, active arcs, suggested mode.
 
 4. **Check for active arcs** (already included in `maps check` output)
 
@@ -759,7 +793,8 @@ maps vent "..."                             # parse and log free text — extrac
 maps tulpa                                  # multi-line stream capture (end with /done)
 maps flash "..."                            # sub-threshold capture
 maps check                                  # session start
-maps pattern                                # full arc output
+maps check --role                           # session start + mode/energy/arc/refs guidance
+maps pattern                                # full arc output (also runs cycle_meta / ARC 26)
 maps survival                               # survival mode status
 maps eval                                   # agent performance trend
 maps wins [--week] [--month]                # surface WIN entries
