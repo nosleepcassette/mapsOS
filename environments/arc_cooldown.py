@@ -9,7 +9,7 @@ An arc that fires is suppressed for its cooldown window (in days).
 from __future__ import annotations
 
 import json
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 
@@ -31,6 +31,7 @@ ARC_COOLDOWNS: dict[str, int] = {
     "goal_stall": 7,
     "resistance_pattern": 5,
     "negative_interaction_pattern": 7,
+    "cycle_meta": 7,
 }
 
 
@@ -86,3 +87,54 @@ def record_fired(arc_name: str, cooldowns: dict) -> dict:
     updated = dict(cooldowns or {})
     updated[arc_name] = date.today().isoformat()
     return updated
+
+
+# ---------------------------------------------------------------------------
+# Arc fire history — tracks all fire dates per arc for frequency analysis
+# ---------------------------------------------------------------------------
+
+_HISTORY_PATH = Path.home() / ".maps_os_arc_history.json"
+_HISTORY_PRUNE_DAYS = 90  # discard entries older than this
+
+
+def load_history() -> dict[str, list[str]]:
+    """Load {arc_name: [iso_date, ...]}. Returns {} on missing file."""
+    if not _HISTORY_PATH.exists():
+        return {}
+    try:
+        data = json.loads(_HISTORY_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_history(history: dict[str, list[str]]) -> None:
+    """Persist history. Never raises."""
+    try:
+        _HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _HISTORY_PATH.write_text(
+            json.dumps(history, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        return None
+
+
+def record_history(arc_name: str, history: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Append today to arc's fire history, pruning entries older than 90 days."""
+    updated = dict(history)
+    dates = list(updated.get(arc_name, []))
+    today = date.today().isoformat()
+    if today not in dates:
+        dates.append(today)
+    cutoff = (date.today() - timedelta(days=_HISTORY_PRUNE_DAYS)).isoformat()
+    dates = [d for d in dates if d >= cutoff]
+    updated[arc_name] = dates
+    return updated
+
+
+def get_fire_count(arc_name: str, history: dict[str, list[str]], days: int = 14) -> int:
+    """Count how many times arc fired within the last N days."""
+    dates = history.get(arc_name, [])
+    cutoff = (date.today() - timedelta(days=days)).isoformat()
+    return sum(1 for d in dates if d >= cutoff)

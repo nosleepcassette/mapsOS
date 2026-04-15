@@ -920,6 +920,57 @@ def _arc_negative_interaction_pattern(person_entries: list) -> Optional[Arc]:
     )
 
 
+def _arc_cycle_meta(state_entries: list) -> Optional[Arc]:
+    """META-ARC — Manic/depleted cycling over 60 days (3+ alternations).
+
+    Requires a long recall window — only run from cmd_pattern (60+ entries).
+    Fires as alert: this is structural, not incidental.
+    """
+    if len(state_entries) < 6:
+        return None
+
+    # Extract (date, tag) pairs for manic/depleted only
+    from datetime import timedelta
+
+    dated = []
+    for e in state_entries:
+        d = _entry_date(e)
+        t = _tag(e)
+        if d and t in ("manic", "depleted"):
+            dated.append((d, t))
+
+    if len(dated) < 4:
+        return None
+
+    dated.sort(key=lambda x: x[0])
+
+    # Prune to 60-day window
+    window_start = dated[-1][0] - timedelta(days=60)
+    dated = [(d, t) for d, t in dated if d >= window_start]
+
+    # Count direction changes (manic→depleted or depleted→manic = 1 alternation)
+    alternations = 0
+    last_tag = None
+    for _, tag in dated:
+        if last_tag is None:
+            last_tag = tag
+        elif tag != last_tag:
+            alternations += 1
+            last_tag = tag
+
+    if alternations >= 3:
+        return Arc(
+            name="cycle_meta",
+            severity="alert",
+            message=(
+                f"{alternations} manic/depleted alternations in 60 days. "
+                "this is a cycle, not random variation. worth tracking explicitly."
+            ),
+            data={"alternations": alternations, "entries_analyzed": len(dated)},
+        )
+    return None
+
+
 def _arc_exec_dysfunction(
     state_entries: list,
     resistance_entries: list,
@@ -991,11 +1042,15 @@ def weave(
     person_entries: list = None,
     resistance_entries: list = None,
     apply_cooldown: bool = True,
+    state_entries_long: list = None,
 ) -> list[Arc]:
     """
     Run all arc detectors in priority order.
     First alert-level arc wins (no alert stacking).
     All insights are returned.
+
+    state_entries_long: extended history (60+ entries) used for cycle_meta detection.
+    If None, cycle_meta is skipped.
     """
     if flash_entries is None:
         flash_entries = []
@@ -1063,12 +1118,19 @@ def weave(
         if arc is not None:
             arcs.append(arc)
 
+    # Cycle meta — requires extended state history (60+ entries), skip if not provided
+    if state_entries_long is not None:
+        arc = _arc_cycle_meta(state_entries_long)
+        if arc is not None:
+            arcs.append(arc)
+
     arcs = [a for a in arcs if a is not None]
 
     if not apply_cooldown or not arcs:
         return arcs
 
     cooldowns = arc_cooldown.load_cooldowns()
+    history = arc_cooldown.load_history()
     visible_arcs: list[Arc] = []
     for arc in arcs:
         cooldown_days = arc_cooldown.ARC_COOLDOWNS.get(arc.name, 0)
@@ -1077,10 +1139,22 @@ def weave(
             and arc_cooldown.is_suppressed(arc.name, cooldowns, cooldown_days)
         ):
             continue
+        # Frequency upgrade: insight → alert if arc fired 3+ times in 14 days
+        if arc.severity == "insight":
+            recent_fires = arc_cooldown.get_fire_count(arc.name, history, days=14)
+            if recent_fires >= 3:
+                arc = Arc(
+                    name=arc.name,
+                    severity="alert",
+                    message=f"[recurring × {recent_fires + 1} in 14 days] {arc.message}",
+                    data={**arc.data, "frequency_upgraded": True, "recent_fires": recent_fires},
+                )
         visible_arcs.append(arc)
         cooldowns = arc_cooldown.record_fired(arc.name, cooldowns)
+        history = arc_cooldown.record_history(arc.name, history)
 
     arc_cooldown.save_cooldowns(cooldowns)
+    arc_cooldown.save_history(history)
     return visible_arcs
 
 

@@ -8,3 +8,9 @@ __pycache__/
 .env
 config.yaml
 .DS_Store
+
+# private — never commit
+intakes/
+scripts/
+therapist-intake-master.md
+docs/bipolar_tracking_protocol.md

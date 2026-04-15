@@ -83,6 +83,7 @@ maps intention movement met "walked 45min"
 
 # session + pattern
 maps check                    # session start: context pull + arc check
+maps check --role             # + agent mode guidance (STATE → role, energy tier, refs to load)
 maps pattern                  # full pattern weaver output
 maps review                   # cycle review (last 14 days)
 maps survival                 # check / display survival mode
@@ -171,6 +172,7 @@ The arc set goes well beyond what most tracking tools attempt. Where a standard 
 | `body_neglect` | High flow + hunger ignored or no movement | 1 day |
 | `isolation_creep` | 3+ isolation logs or 5+ days no connection | 2 days |
 | `state_dip_holding` | 2+ low states in last 3 — triggers survival mode | never suppressed |
+| `cycle_meta` | 3+ manic/depleted alternations in 60 days — structural cycle, not random variation | 7 days |
 
 ### Insight arcs (all that apply)
 
@@ -224,6 +226,10 @@ Arcs are suppressed after firing to prevent alert fatigue. A `manic_spike` that 
 
 Survival-severity arcs (`state_dip_holding`) are never suppressed.
 
+### Frequency threshold
+
+Arc fire history is tracked separately in `~/.maps_os_arc_history.json`. Any insight-severity arc that fires 3 or more times within 14 days is automatically upgraded to alert severity and labeled `[recurring × N in 14 days]`. This distinguishes a one-off pattern detection from something that's genuinely persistent and needs direct attention.
+
 ---
 
 ## Local Storage
@@ -247,6 +253,7 @@ maps person alex         # recent interactions + notes
 
 - [Setup Guide](docs/SETUP.md)
 - [Walkthrough](docs/WALKTHROUGH.md)
+- [RL Design Spec](docs/RL_SPEC.md)
 - [Agent Skill](https://gist.github.com/nosleepcassette/6644b13147a064c234a20b2642a4809e)
 
 ---
@@ -272,22 +279,38 @@ Add that `export` line to your `~/.zshrc` or `~/.bashrc` to make it permanent.
 
 **Agent integration:** [`SKILL.md`](https://gist.github.com/nosleepcassette/6644b13147a064c234a20b2642a4809e) — Hermes operator guide covering session protocol, vent parsing, arc response calibration, and tulpa capture mode.
 
+`maps check --role` outputs agent mode guidance at session start: current STATE, suggested interaction mode, energy tier, arcs active and their role implications, and reference files to load. The role mapping table in `bin/maps` is designed to be adapted to any agent that has a mode or persona system.
+
 ---
 
 ## RL Training
 
-`environments/maps_os_env.py` is an Atropos-compatible RL training environment. 13 scenarios across vent, session start, survival, cycle review, and intention log modes.
+Two Atropos-compatible RL training environments are included.
 
-Reward weights:
+**`maps_os_env.py`** — data fidelity training. 13 scenarios across vent, session start, survival, cycle review, and intention log modes. Trains the agent to log correct entries, use correct STATE tags, avoid shame language, and handle survival mode.
 
 | Component | Weight | What it measures |
 |-----------|--------|-----------------|
-| `state_logged` | 0.25 | Did the user log STATE? |
+| `state_logged` | 0.25 | Did the agent log/reference STATE? |
 | `correct_state` | 0.20 | Valid and contextually appropriate tag |
 | `track_coverage` | 0.20 | BODY/MIND/SPIRIT covered |
 | `tool_coverage` | 0.15 | Expected tools used |
 | `no_streak_language` | 0.10 | No pressure vocabulary |
 | `survival_correct` | 0.10 | Survival mode handled correctly |
+
+**`cassette_rl_env.py`** — therapeutic effectiveness training. 10 arc/STATE-grounded scenarios (survival, trust rupture, manic spike, exec dysfunction, cycle meta, frequency-upgraded arcs, etc.). Trains the agent to activate the right mode for each STATE context and avoid wrong moves. Includes `SessionOutcomeLogger` for collecting real outcome data from live sessions.
+
+Outcome reward weights:
+
+| Component | Weight | What it measures |
+|-----------|--------|-----------------|
+| `arc_resolution` | 0.35 | Did active arcs clear after the response? |
+| `state_trajectory` | 0.25 | Did STATE stabilize or lift in the next session? |
+| `role_match` | 0.20 | Was the activated mode appropriate for STATE? |
+| `engagement` | 0.15 | Did the user continue the session after the response? |
+| `no_shame_spike` | ±0.05 | Did shame arcs fire within 24hr? (bonus/penalty) |
+
+See [`docs/RL_SPEC.md`](docs/RL_SPEC.md) for the full design rationale and implementation path.
 
 ---
 
@@ -309,10 +332,11 @@ mapsOS/
 │   └── maps                    — CLI entry point (human + agent facing)
 ├── environments/
 │   ├── vent_parser.py          — free-form text → structured entries
-│   ├── pattern_weaver.py       — arc detection (ARCs 1–25)
-│   ├── arc_cooldown.py         — per-arc suppression, ~/.maps_os_cooldown.json
+│   ├── pattern_weaver.py       — arc detection (ARCs 1–26)
+│   ├── arc_cooldown.py         — per-arc suppression + fire history tracking
 │   ├── survival_mode.py        — survival mode state machine
-│   ├── maps_os_env.py          — Atropos RL training environment
+│   ├── maps_os_env.py          — Atropos RL env: data fidelity training
+│   ├── cassette_rl_env.py      — Atropos RL env: therapeutic effectiveness training
 │   ├── maps_os_config.py       — config loader, person_context()
 │   ├── local_store.py          — SQLite local store
 │   ├── nota_bridge.py          — optional nota integration
@@ -330,7 +354,8 @@ mapsOS/
 └── docs/
     ├── SETUP.md                — install + configuration guide
     ├── WALKTHROUGH.md          — human usage walkthrough
-    └── SKILL.md                — Hermes agent operator skill
+    ├── SKILL.md                — Hermes agent operator skill
+    └── RL_SPEC.md              — RL environment design rationale + implementation path
 ```
 
 ---

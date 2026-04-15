@@ -1054,6 +1054,60 @@ def cmd_events(args) -> int:
     return 0
 
 
+# ---------------------------------------------------------------------------
+# Role mapping tables (mirrors state-role-map.md)
+# ---------------------------------------------------------------------------
+
+_STATE_ROLE: dict[str, tuple[str, str, list[str], str]] = {
+    # state: (primary_role, secondary, suspend_list, energy_tier)
+    "flooded":   ("Therapist (somatic first)", "Friend (witness)", ["Springboard", "Jungian", "depth work"], "Emergency"),
+    "grieving":  ("Therapist → Friend", "Social Worker if practical needs arise", ["Springboard", "planning"], "Emergency"),
+    "surviving": ("Social Worker + basics", "Neurotypical (bureaucracy only)", ["depth work", "Springboard", "planning"], "Emergency"),
+    "depleted":  ("Assistant (if task-stuck)", "rest otherwise", ["depth work"], "Low"),
+    "manic":     ("Neurotypical (body check first)", "Therapist (watch ARC 1)", ["Springboard", "Jungian"], "Low"),
+    "stable":    ("follow maps's lead", "anything available", [], "Medium"),
+    "grounded":  ("Springboard / Therapist", "depth work available", [], "High"),
+    "thriving":  ("Springboard", "Jungian + depth work available", [], "High"),
+    "tender":    ("Friend (low directiveness)", "Therapist if she wants to process", ["Assistant", "planning"], "Medium"),
+    "clear":     ("Springboard", "Jungian, pattern synthesis", [], "High"),
+}
+
+_STATE_REFS: dict[str, list[str]] = {
+    "flooded":   ["tier1-trauma.md (stabilization)", "tier1-dbt.md (TIPP/distress tolerance)", "tier2-somatic.md"],
+    "grieving":  ["tier1-trauma.md", "tier1-dbt.md", "sf-resources.md (if practical needs)"],
+    "surviving": ["sf-resources.md", "exec-function.md (bureaucracy only)"],
+    "depleted":  ["task-breakdown.md (energy accounting)"],
+    "manic":     ["exec-function.md (body check)", "tier1-dbt.md (TIPP)"],
+    "stable":    [],
+    "grounded":  ["reflective-practice.md", "tier1-ifs.md"],
+    "thriving":  ["reflective-practice.md", "tier3-jungian.md"],
+    "tender":    ["reciprocity.md", "tier1-ifs.md"],
+    "clear":     ["reflective-practice.md", "tier3-jungian.md"],
+}
+
+_ARC_ROLE_HINTS: dict[str, str] = {
+    "manic_spike":               "→ Therapist: TIPP + body check  [tier1-dbt.md]",
+    "isolation_creep":           "→ Friend: reciprocity  [references/friend/reciprocity.md]",
+    "body_neglect":              "→ Assistant / Neurotypical: energy accounting  [task-breakdown.md]",
+    "state_dip_holding":         "→ Therapist → Social Worker: stabilization  [tier1-trauma.md]",
+    "spirit_rising":             "→ Friend: witness the rising — don't redirect to problem-solving",
+    "post_manic_drop":           "→ Therapist: window of tolerance + DBT PLEASE  [tier1-trauma.md]",
+    "catastrophizing_spike":     "→ Therapist: Catastrophizing Spiral  [scripts/therapist-patterns.md]",
+    "avoidance_language":        "→ Therapist / Assistant: Avoidance Loop  [scripts/therapist-patterns.md]",
+    "decision_pile":             "→ Springboard: synthesis function  [springboard/reflective-practice.md]",
+    "goal_stall":                "→ Assistant: 3 Things Model  [task-breakdown.md]",
+    "trust_rupture":             "→ ALL ROLES SUSPEND. witness only. 'logged. that's heavy.'",
+    "substance_coping":          "→ Therapist (silent): log pattern, surface in review only",
+    "exec_dysfunction":          "→ Neurotypical + Assistant  [exec-function.md + task-breakdown.md]",
+    "resistance_pattern":        "→ Therapist / Assistant: Avoidance Loop + IFS inquiry  [therapist-patterns.md]",
+    "intrusive_loop":            "→ Springboard: connection function  [reflective-practice.md]",
+    "negative_interaction_pattern": "→ Friend / Partner: reciprocity or gottman depending on who",
+    "productivity_spiral":       "→ Therapist: is it flow or is it fear?  [therapist-patterns.md]",
+    "cycle_meta":                "→ Therapist: explicit cycle tracking  [tier1-dbt.md + tier1-ifs.md]",
+    "planning_hyperfocus":       "→ Assistant: smallest first step only  [task-breakdown.md]",
+}
+
+
 def cmd_check(args, quiet: bool = False) -> int:
     state_entries     = _recall("STATE:",     args.graph, limit=7)
     body_entries      = _recall("BODY:",      args.graph, limit=7)
@@ -1107,20 +1161,46 @@ def cmd_check(args, quiet: bool = False) -> int:
     if n_pending and not quiet:
         print(f"  ({n_pending} local entries waiting — run 'maps sync')", file=sys.stderr)
 
+    # Role block — only if --role flag set
+    if getattr(args, "role", False) and state_entries:
+        state_tag = _extract_tag(state_entries[-1])
+        role_data = _STATE_ROLE.get(state_tag)
+        if role_data:
+            primary, secondary, suspend, energy = role_data
+            refs = _STATE_REFS.get(state_tag, [])
+            print()
+            print(f"ROLE  {state_tag} → {primary}  [{energy} energy]")
+            if secondary:
+                print(f"      secondary: {secondary}")
+            if suspend:
+                print(f"      suspend:   {', '.join(suspend)}")
+            arc_hints = [
+                _ARC_ROLE_HINTS[a.name]
+                for a in arcs
+                if a.name in _ARC_ROLE_HINTS
+            ]
+            for hint in arc_hints:
+                print(f"      ARC {hint}")
+            if refs:
+                print(f"      refs: {', '.join(refs)}")
+        else:
+            print(f"\nROLE  no mapping for state '{state_tag}' — follow maps's lead")
+
     return 0
 
 
 def cmd_pattern(args) -> int:
-    state_entries     = _recall("STATE:",     args.graph, limit=14)
-    body_entries      = _recall("BODY:",      args.graph, limit=14)
-    mind_entries      = _recall("MIND:",      args.graph, limit=14)
-    spirit_entries    = _recall("SPIRIT:",    args.graph, limit=14)
-    intention_entries = _recall("INTENTION:", args.graph, limit=21)
-    flash_entries     = _recall("FLASH:",     args.graph, limit=10)
-    decision_entries  = _recall("DECISION:",  args.graph, limit=21)
-    trigger_entries   = _recall("TRIGGER:",   args.graph, limit=21)
-    goal_entries      = _recall("GOAL:",      args.graph, limit=21)
-    person_entries    = _recall("PERSON:",    args.graph, limit=21)
+    state_entries      = _recall("STATE:",     args.graph, limit=14)
+    state_entries_long = _recall("STATE:",     args.graph, limit=60)  # for cycle_meta
+    body_entries       = _recall("BODY:",      args.graph, limit=14)
+    mind_entries       = _recall("MIND:",      args.graph, limit=14)
+    spirit_entries     = _recall("SPIRIT:",    args.graph, limit=14)
+    intention_entries  = _recall("INTENTION:", args.graph, limit=21)
+    flash_entries      = _recall("FLASH:",     args.graph, limit=10)
+    decision_entries   = _recall("DECISION:",  args.graph, limit=21)
+    trigger_entries    = _recall("TRIGGER:",   args.graph, limit=21)
+    goal_entries       = _recall("GOAL:",      args.graph, limit=21)
+    person_entries     = _recall("PERSON:",    args.graph, limit=21)
     resistance_entries = _recall("RESISTANCE:", args.graph, limit=21)
 
     arcs = weave(
@@ -1135,6 +1215,7 @@ def cmd_pattern(args) -> int:
         goal_entries=goal_entries,
         person_entries=person_entries,
         resistance_entries=resistance_entries,
+        state_entries_long=state_entries_long,
     )
 
     if not arcs:
@@ -1294,7 +1375,8 @@ def build_parser() -> argparse.ArgumentParser:
     it.add_argument("status")
     it.add_argument("note", nargs="*")
 
-    sub.add_parser("check",    help="session start context + pattern check")
+    ch = sub.add_parser("check", help="session start context + pattern check")
+    ch.add_argument("--role", action="store_true", help="output cassette role recommendation")
     sub.add_parser("pattern",  help="full pattern weaver output")
     sub.add_parser("review",   help="cycle review (14 days)")
     sub.add_parser("survival", help="check/display survival mode")
