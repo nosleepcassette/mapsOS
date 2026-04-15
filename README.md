@@ -107,7 +107,7 @@ maps events                   # upcoming events
 maps events --week            # this week only
 
 # people
-maps person alex              # profile + recent interactions
+maps person grungler          # profile + recent interactions
 maps person --list            # all known people + last contact
 
 # visualization
