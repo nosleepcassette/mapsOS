@@ -311,7 +311,7 @@ def render_viz(
     Returns rich.panel.Panel with box.ROUNDED.
     """
     try:
-        from rich.console import Console
+        from rich.console import Group, Console
         from rich.panel import Panel
         from rich.text import Text
         from rich import box as rich_box
@@ -332,47 +332,38 @@ def render_viz(
 
     border_color = _color_for_state(current_state)
 
-    text = Text()
+    # Build sections as discrete renderables so Table renders natively
+    # (embedding Table in Text via capture breaks column alignment)
+    sections: list = []
 
-    # Sparkline section
-    text.append("STATE · 14 days\n", style=f"bold {AMBER}")
+    # STATE sparkline
+    sections.append(Text(f"STATE · 14 days\n", style=f"bold {AMBER}"))
     spark = render_state_sparkline(state_entries, days=14)
-    if spark:
-        text.append_text(spark)
-    text.append("\n\n")
+    sections.append(spark if spark else Text("no state data", style="dim"))
+    sections.append(Text("\n\n"))
 
-    # Body heat grid — capture as string (Table can't embed in Text directly)
-    text.append("BODY · 7 days\n", style=f"bold {AMBER}")
+    # BODY heat grid — Table added directly, no capture
+    sections.append(Text("BODY · 7 days\n", style=f"bold {AMBER}"))
     grid = render_body_heatgrid(body_entries, days=7)
-    if grid:
-        import os as _os
-        try:
-            _cap_w = max(40, _os.get_terminal_size().columns - 8)
-        except (OSError, AttributeError):
-            _cap_w = 72
-        _cap_con = Console(highlight=False, force_terminal=True, width=_cap_w, no_color=False)
-        with _cap_con.capture() as cap:
-            _cap_con.print(grid)
-        text.append(cap.get().rstrip())
-        text.append("\n\n")
-    else:
-        text.append("no body data\n\n", style="dim")
+    sections.append(grid if grid else Text("no body data", style="dim"))
+    sections.append(Text("\n"))
 
     # Arc frequency
-    text.append("ARC frequency · 30 days\n", style=f"bold {AMBER}")
+    arc_text = Text()
+    arc_text.append("\nARC frequency · 30 days\n", style=f"bold {AMBER}")
     arc_counts: Counter = Counter()
     for arc in arc_history:
         if hasattr(arc, "name"):
             arc_counts[arc.name] += 1
-
     if arc_counts:
         for arc_name, count in arc_counts.most_common(8):
-            text.append(f"  {arc_name:<28} {count}\n", style="dim")
+            arc_text.append(f"  {arc_name:<28} {count}\n", style="dim")
     else:
-        text.append("  no arcs fired\n", style="dim")
+        arc_text.append("  no arcs fired\n", style="dim")
+    sections.append(arc_text)
 
     return Panel(
-        text,
+        Group(*sections),
         title=f"[bold {AMBER}]mapsOS viz[/bold {AMBER}]",
         border_style=border_color,
         box=rich_box.ROUNDED,

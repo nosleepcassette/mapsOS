@@ -8,6 +8,17 @@ Not a habit tracker. Not a mood journal. Not a productivity app.
 
 mapsOS tracks narrative states, surfaces patterns across days and weeks, and knows when to drop everything non-essential. Runs as a standalone CLI and TUI with local SQLite storage and an optional remote backend.
 
+<table>
+<tr>
+<td align="center"><img src="docs/screenshots/splash.png" width="440"><br><sub>splash + loading</sub></td>
+<td align="center"><img src="docs/screenshots/dashboard.png" width="440"><br><sub>dashboard — sparkline · body grid · arcs</sub></td>
+</tr>
+<tr>
+<td align="center"><img src="docs/screenshots/viz.png" width="440"><br><sub>viz panel — state · body · arc frequency</sub></td>
+<td align="center"><img src="docs/screenshots/about.png" width="440"><br><sub>about screen</sub></td>
+</tr>
+</table>
+
 ---
 
 ## Why this exists
@@ -136,7 +147,7 @@ python3 bin/maps
 
 Requires `rich`. No Textual dependency — raw termios + Rich.
 
-Warm amber palette. STATE-specific colors. Dashboard, survival, vent, flash, state, body, mind, spirit, intention, review, help, and sync screens.
+Warm amber palette. STATE-specific colors. Layout-based dashboard with live sparkline, body heat grid, and arc panel. Animated splash on load.
 
 | Key        | Action                            |
 |------------|-----------------------------------|
@@ -153,7 +164,9 @@ Warm amber palette. STATE-specific colors. Dashboard, survival, vent, flash, sta
 | `y`        | sync local store                  |
 | `T`        | trend chart                       |
 | `V`        | viz dashboard                     |
-| `?` / `h`  | help                              |
+| `a`        | about                             |
+| `d`        | open docs in browser              |
+| `?` / `h`  | help + docs                       |
 | `q`        | quit                              |
 
 ---

@@ -86,8 +86,11 @@ class TestVizPhase26Fixes:
         ]
 
         panel = render_viz(body_entries, [])
-        # Panel should be returned and contain sleep data
+        # Panel should be returned (renderable is now a Group, not Text)
         assert panel is not None
-        plain = panel.renderable.plain
-        # sleep row should appear somewhere in the output
-        assert "sleep" in plain
+        # Render to string and verify sleep row appears
+        from rich.console import Console
+        con = Console(width=80, highlight=False)
+        with con.capture() as cap:
+            con.print(panel)
+        assert "sleep" in cap.get()
