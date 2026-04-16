@@ -37,7 +37,13 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_REPO_ROOT))
 
-from environments.maps_os_config import known_people, person_birth_hint, person_context
+from environments.maps_os_config import (
+    known_people,
+    person_birth_hint,
+    person_context,
+    load_config,
+    load_survival_config,
+)
 from environments.vent_parser import parse_vent, VALID_STATE_TAGS
 from environments.pattern_weaver import weave
 from environments.survival_mode import (
@@ -189,6 +195,25 @@ def _remember(content: str, graph: str, dry_run: bool = False) -> str:
 def _recall(prefix: str, graph: str, limit: int = 7) -> list[dict]:
     entries, _ = recall_resilient(prefix, graph=graph, limit=limit)
     return entries
+
+
+def _survival_settings() -> dict:
+    return load_survival_config(load_config())
+
+
+def _evaluate_survival(state_entries: list):
+    import inspect
+
+    cfg = _survival_settings()
+    params = inspect.signature(eval_survival).parameters
+    if {"low_states", "window", "threshold"}.issubset(params):
+        return eval_survival(
+            state_entries,
+            low_states=cfg["low_states"],
+            window=cfg["window"],
+            threshold=cfg["threshold"],
+        )
+    return eval_survival(state_entries)
 
 
 def _parse_iso_date(value: str) -> date | None:
@@ -387,8 +412,8 @@ def cmd_vent(args) -> int:
 
     # Survival mode filter
     if not args.no_survival_check:
-        recent_states = _recall("STATE:", args.graph, limit=3)
-        survival = eval_survival(recent_states)
+        recent_states = _recall("STATE:", args.graph, limit=max(5, _survival_settings()["window"]))
+        survival = _evaluate_survival(recent_states)
         if survival.active:
             entries = filter_entries_for_survival(entries)
             print("survival mode — logging state/body only")
@@ -564,8 +589,8 @@ def cmd_tulpa(args) -> int:
     entries = parse_vent(text, log_date=args.date or _today())
 
     if not args.no_survival_check:
-        recent_states = _recall("STATE:", args.graph, limit=3)
-        survival = eval_survival(recent_states)
+        recent_states = _recall("STATE:", args.graph, limit=max(5, _survival_settings()["window"]))
+        survival = _evaluate_survival(recent_states)
         if survival.active:
             entries = filter_entries_for_survival(entries)
             print("survival mode — logging state/body only")
@@ -1054,60 +1079,6 @@ def cmd_events(args) -> int:
     return 0
 
 
-# ---------------------------------------------------------------------------
-# Role mapping tables (mirrors state-role-map.md)
-# ---------------------------------------------------------------------------
-
-_STATE_ROLE: dict[str, tuple[str, str, list[str], str]] = {
-    # state: (primary_role, secondary, suspend_list, energy_tier)
-    "flooded":   ("Therapist (somatic first)", "Friend (witness)", ["Springboard", "Jungian", "depth work"], "Emergency"),
-    "grieving":  ("Therapist → Friend", "Social Worker if practical needs arise", ["Springboard", "planning"], "Emergency"),
-    "surviving": ("Social Worker + basics", "Neurotypical (bureaucracy only)", ["depth work", "Springboard", "planning"], "Emergency"),
-    "depleted":  ("Assistant (if task-stuck)", "rest otherwise", ["depth work"], "Low"),
-    "manic":     ("Neurotypical (body check first)", "Therapist (watch ARC 1)", ["Springboard", "Jungian"], "Low"),
-    "stable":    ("follow maps's lead", "anything available", [], "Medium"),
-    "grounded":  ("Springboard / Therapist", "depth work available", [], "High"),
-    "thriving":  ("Springboard", "Jungian + depth work available", [], "High"),
-    "tender":    ("Friend (low directiveness)", "Therapist if she wants to process", ["Assistant", "planning"], "Medium"),
-    "clear":     ("Springboard", "Jungian, pattern synthesis", [], "High"),
-}
-
-_STATE_REFS: dict[str, list[str]] = {
-    "flooded":   ["tier1-trauma.md (stabilization)", "tier1-dbt.md (TIPP/distress tolerance)", "tier2-somatic.md"],
-    "grieving":  ["tier1-trauma.md", "tier1-dbt.md", "sf-resources.md (if practical needs)"],
-    "surviving": ["sf-resources.md", "exec-function.md (bureaucracy only)"],
-    "depleted":  ["task-breakdown.md (energy accounting)"],
-    "manic":     ["exec-function.md (body check)", "tier1-dbt.md (TIPP)"],
-    "stable":    [],
-    "grounded":  ["reflective-practice.md", "tier1-ifs.md"],
-    "thriving":  ["reflective-practice.md", "tier3-jungian.md"],
-    "tender":    ["reciprocity.md", "tier1-ifs.md"],
-    "clear":     ["reflective-practice.md", "tier3-jungian.md"],
-}
-
-_ARC_ROLE_HINTS: dict[str, str] = {
-    "manic_spike":               "→ Therapist: TIPP + body check  [tier1-dbt.md]",
-    "isolation_creep":           "→ Friend: reciprocity  [references/friend/reciprocity.md]",
-    "body_neglect":              "→ Assistant / Neurotypical: energy accounting  [task-breakdown.md]",
-    "state_dip_holding":         "→ Therapist → Social Worker: stabilization  [tier1-trauma.md]",
-    "spirit_rising":             "→ Friend: witness the rising — don't redirect to problem-solving",
-    "post_manic_drop":           "→ Therapist: window of tolerance + DBT PLEASE  [tier1-trauma.md]",
-    "catastrophizing_spike":     "→ Therapist: Catastrophizing Spiral  [scripts/therapist-patterns.md]",
-    "avoidance_language":        "→ Therapist / Assistant: Avoidance Loop  [scripts/therapist-patterns.md]",
-    "decision_pile":             "→ Springboard: synthesis function  [springboard/reflective-practice.md]",
-    "goal_stall":                "→ Assistant: 3 Things Model  [task-breakdown.md]",
-    "trust_rupture":             "→ ALL ROLES SUSPEND. witness only. 'logged. that's heavy.'",
-    "substance_coping":          "→ Therapist (silent): log pattern, surface in review only",
-    "exec_dysfunction":          "→ Neurotypical + Assistant  [exec-function.md + task-breakdown.md]",
-    "resistance_pattern":        "→ Therapist / Assistant: Avoidance Loop + IFS inquiry  [therapist-patterns.md]",
-    "intrusive_loop":            "→ Springboard: connection function  [reflective-practice.md]",
-    "negative_interaction_pattern": "→ Friend / Partner: reciprocity or gottman depending on who",
-    "productivity_spiral":       "→ Therapist: is it flow or is it fear?  [therapist-patterns.md]",
-    "cycle_meta":                "→ Therapist: explicit cycle tracking  [tier1-dbt.md + tier1-ifs.md]",
-    "planning_hyperfocus":       "→ Assistant: smallest first step only  [task-breakdown.md]",
-}
-
-
 def cmd_check(args, quiet: bool = False) -> int:
     state_entries     = _recall("STATE:",     args.graph, limit=7)
     body_entries      = _recall("BODY:",      args.graph, limit=7)
@@ -1121,7 +1092,7 @@ def cmd_check(args, quiet: bool = False) -> int:
     person_entries    = _recall("PERSON:",    args.graph, limit=21)
     resistance_entries = _recall("RESISTANCE:", args.graph, limit=21)
 
-    survival = eval_survival(state_entries)
+    survival = _evaluate_survival(state_entries)
     if survival.active:
         print(survival_briefing())
         return 0
@@ -1163,28 +1134,11 @@ def cmd_check(args, quiet: bool = False) -> int:
 
     # Role block — only if --role flag set
     if getattr(args, "role", False) and state_entries:
+        from environments.roles import format_role_output
+
         state_tag = _extract_tag(state_entries[-1])
-        role_data = _STATE_ROLE.get(state_tag)
-        if role_data:
-            primary, secondary, suspend, energy = role_data
-            refs = _STATE_REFS.get(state_tag, [])
-            print()
-            print(f"ROLE  {state_tag} → {primary}  [{energy} energy]")
-            if secondary:
-                print(f"      secondary: {secondary}")
-            if suspend:
-                print(f"      suspend:   {', '.join(suspend)}")
-            arc_hints = [
-                _ARC_ROLE_HINTS[a.name]
-                for a in arcs
-                if a.name in _ARC_ROLE_HINTS
-            ]
-            for hint in arc_hints:
-                print(f"      ARC {hint}")
-            if refs:
-                print(f"      refs: {', '.join(refs)}")
-        else:
-            print(f"\nROLE  no mapping for state '{state_tag}' — follow maps's lead")
+        print()
+        print(format_role_output(state_tag, arcs))
 
     return 0
 
@@ -1261,8 +1215,8 @@ def cmd_review(args) -> int:
 
 
 def cmd_survival(args) -> int:
-    state_entries = _recall("STATE:", args.graph, limit=3)
-    survival = eval_survival(state_entries)
+    state_entries = _recall("STATE:", args.graph, limit=max(5, _survival_settings()["window"]))
+    survival = _evaluate_survival(state_entries)
     if survival.active:
         print(f"survival mode active ({survival.days_in_mode} days)")
         print()
@@ -1270,6 +1224,25 @@ def cmd_survival(args) -> int:
     else:
         tag = _extract_tag(state_entries[-1]) if state_entries else "unknown"
         print(f"survival mode inactive (last state: {tag})")
+    return 0
+
+
+def cmd_roles(args) -> int:
+    from environments.roles import MODE_PROFILES, STATE_MODE_MAP
+
+    print("\nROLE / MODE REFERENCE\n")
+    print(f"{'STATE':<12}  {'MODE':<20}  {'ENERGY'}")
+    print("─" * 50)
+    for state, (mode, energy) in STATE_MODE_MAP.items():
+        print(f"  {state:<10}  {mode:<20}  {energy}")
+
+    print("\nMODE PROFILES\n")
+    for mode, profile in MODE_PROFILES.items():
+        print(f"  {mode}")
+        print(f"    {profile['description']}")
+        print(f"    energy: {profile['energy']}")
+        print()
+
     return 0
 
 
@@ -1376,10 +1349,11 @@ def build_parser() -> argparse.ArgumentParser:
     it.add_argument("note", nargs="*")
 
     ch = sub.add_parser("check", help="session start context + pattern check")
-    ch.add_argument("--role", action="store_true", help="output cassette role recommendation")
+    ch.add_argument("--role", action="store_true", help="output embedded mode guidance")
     sub.add_parser("pattern",  help="full pattern weaver output")
     sub.add_parser("review",   help="cycle review (14 days)")
     sub.add_parser("survival", help="check/display survival mode")
+    sub.add_parser("roles", help="print mode/role reference table")
 
     sy = sub.add_parser("sync", help="flush deferred local entries")
     sy.add_argument("--status", action="store_true", help="show pending count only")
@@ -1439,6 +1413,7 @@ COMMAND_MAP = {
     "pattern":   cmd_pattern,
     "review":    cmd_review,
     "survival":  cmd_survival,
+    "roles":     cmd_roles,
     "sync":      cmd_sync,
     "tulpa":     cmd_tulpa,
     "eval":      cmd_eval,

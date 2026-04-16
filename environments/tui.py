@@ -15,9 +15,9 @@ import time
 import select
 import termios
 import tty
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 try:
     from rich.console import Console
@@ -28,10 +28,12 @@ try:
     from rich.markup import escape
     from rich.columns import Columns
     from rich.padding import Padding
+    from rich import box as _rich_box
 
     HAS_RICH = True
 except ImportError:
     HAS_RICH = False
+    _rich_box = None
 
 
 # ---------------------------------------------------------------------------
@@ -50,24 +52,34 @@ LOGO_LINES = [
 ]
 
 TAGLINE = "qualitative life operating system"
+BYLINE = "built with love by & for maps  ·  https://cassette.help"
+SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
 
 # ---------------------------------------------------------------------------
 # Color palette
 # ---------------------------------------------------------------------------
 
-# STATE tag → Rich color
-STATE_COLORS = {
-    "depleted": "#9e9e9e",  # worn grey
-    "grieving": "#90a4ae",  # muted blue-grey
-    "surviving": "#ef9a9a",  # pale red
-    "flooded": "#ffb74d",  # amber-orange
-    "manic": "#ce93d8",  # soft violet
-    "stable": "#e0e0e0",  # near-white neutral
-    "grounded": "#80cbc4",  # soft teal
-    "tender": "#f48fb1",  # dusty rose
-    "thriving": "#a5d6a7",  # soft green
-    "clear": "#80deea",  # clear cyan
+# Full RGB state palette (matches viz.py STATE_RGB)
+STATE_RGB: dict[str, str] = {
+    "depleted":  "#7a7a7a",   # flat grey
+    "grieving":  "#7b9eb5",   # muted steel blue
+    "surviving": "#c47c7c",   # dull coral
+    "flooded":   "#d4893a",   # deep amber-orange
+    "manic":     "#b07fd4",   # violet
+    "stable":    "#c0bdb4",   # warm neutral
+    "grounded":  "#5fa89b",   # teal
+    "tender":    "#c97a95",   # muted rose
+    "thriving":  "#7ab87e",   # sage green
+    "clear":     "#6abdd4",   # clear sky
 }
+
+# Backwards compat alias
+STATE_COLORS = STATE_RGB
+
+# Severity colors
+ALERT_COLOR    = "#e05c5c"
+INSIGHT_COLOR  = "#d4a84b"
+SURVIVAL_COLOR = "#9e6ba8"
 
 STATE_SYMBOLS = {
     "depleted": "·",
@@ -298,25 +310,70 @@ def _extract_intent_name(e: dict) -> str:
     return ""
 
 
+def _survival_settings() -> dict:
+    from environments.maps_os_config import load_config, load_survival_config
+
+    return load_survival_config(load_config())
+
+
+def _evaluate_survival(state_entries: list):
+    import inspect
+
+    from environments.survival_mode import evaluate as eval_survival
+
+    cfg = _survival_settings()
+    params = inspect.signature(eval_survival).parameters
+    if {"low_states", "window", "threshold"}.issubset(params):
+        return eval_survival(
+            state_entries,
+            low_states=cfg["low_states"],
+            window=cfg["window"],
+            threshold=cfg["threshold"],
+        )
+    return eval_survival(state_entries)
+
+
+def _survival_overridden() -> bool:
+    """Returns True if user dismissed survival mode within the last 24 hours."""
+    from environments.arc_cooldown import load_cooldowns
+
+    try:
+        data = load_cooldowns()
+        ts_str = data.get("survival_override")
+        if not ts_str:
+            return False
+        ts = datetime.fromisoformat(ts_str)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return (datetime.now(timezone.utc) - ts) < timedelta(hours=24)
+    except Exception:
+        return False
+
+
 def _load_context() -> dict:
     """Pull all recent data in one pass."""
     states = _recall("STATE:", 7)
-    body = _recall("BODY:", 5)
+    states_long = _recall("STATE:", 30)   # for sparkline (needs 30 days)
+    body = _recall("BODY:", 30)           # enough for 7-day grid with gap tolerance
     mind = _recall("MIND:", 5)
     spirit = _recall("SPIRIT:", 5)
     intentions = _recall("INTENTION:", 7)
     flash = _recall("FLASH:", 10)
 
-    from environments.pattern_weaver import weave, check_survival_trigger
-    from environments.survival_mode import evaluate as eval_survival
+    from environments.pattern_weaver import weave
     from environments.local_store import count_pending
 
     arcs = weave(states, body, mind, spirit, intentions, flash)
-    survival = eval_survival(states)
+    survival = _evaluate_survival(states)
+    if survival.active and _survival_overridden():
+        survival.active = False
+        survival.days_in_mode = 0
+        survival.trigger_state = None
     pending = count_pending()
 
     return {
         "states": states,
+        "states_long": states_long,
         "body": body,
         "mind": mind,
         "spirit": spirit,
@@ -327,6 +384,80 @@ def _load_context() -> dict:
         "current_state": _extract_tag(states[-1]) if states else "unknown",
         "today": date.today().isoformat(),
     }
+
+
+# ---------------------------------------------------------------------------
+# Splash + transitions
+# ---------------------------------------------------------------------------
+
+
+def _draw_splash(message: str = "loading"):
+    """Full-screen splash with logo, byline, and status line."""
+    clr()
+    w, h = _term_width(), height()
+    logo = LOGO_LINES if w >= 80 else ["mapsOS"]
+    max_logo_w = max(len(line) for line in logo)
+    logo_pad = " " * max(0, (w - max_logo_w) // 2)
+
+    total_block = len(logo) + 6
+    top_pad = max(0, (h - total_block) // 2)
+    for _ in range(top_pad):
+        rp("")
+    for line in logo:
+        rp(f"{logo_pad}[bold {AMBER}]{line}[/bold {AMBER}]")
+    rp("")
+    tag_pad = " " * max(0, (w - len(TAGLINE)) // 2)
+    rp(f"{tag_pad}[{PALE}]{TAGLINE}[/{PALE}]")
+    rp("")
+    by_pad = " " * max(0, (w - len(BYLINE)) // 2)
+    rp(f"{by_pad}[dim]{BYLINE}[/dim]")
+    rp("")
+    sp_text = f"  {message}..."
+    sp_pad = " " * max(0, (w - len(sp_text)) // 2)
+    sys.stdout.write(f"{sp_pad}{sp_text}")
+    sys.stdout.flush()
+
+
+def _animated_load(fn, message: str = "loading"):
+    """
+    Run fn() in a background thread while animating a spinner on the current line.
+    Returns fn's return value.
+    """
+    import threading
+
+    result = [None]
+    exc = [None]
+    done = [False]
+
+    def worker():
+        try:
+            result[0] = fn()
+        except Exception as err:
+            exc[0] = err
+        finally:
+            done[0] = True
+
+    thread = threading.Thread(target=worker, daemon=True)
+    thread.start()
+
+    w = _term_width()
+    frame = 0
+    while not done[0]:
+        sp = SPINNER_FRAMES[frame % len(SPINNER_FRAMES)]
+        line = f"  {sp}  {message}..."
+        sp_pad = " " * max(0, (w - len(line)) // 2)
+        sys.stdout.write(f"\r{sp_pad}{line}")
+        sys.stdout.flush()
+        time.sleep(0.08)
+        frame += 1
+    thread.join()
+
+    sys.stdout.write(f"\r{' ' * w}\r")
+    sys.stdout.flush()
+
+    if exc[0]:
+        raise exc[0]
+    return result[0]
 
 
 # ---------------------------------------------------------------------------
@@ -371,6 +502,8 @@ _HOTKEYS_ROW2 = [
     ("r", "review"),
     ("T", "trend"),
     ("V", "viz"),
+    ("a", "about"),
+    ("d", "docs"),
     ("y", "sync"),
     ("?", "help"),
     ("q", "quit"),
@@ -417,24 +550,252 @@ def _draw_hotkey_bar():
         rp(f"{pad}{rich}")
 
 
+def _open_docs():
+    import webbrowser
+
+    webbrowser.open("https://github.com/nosleepcassette/mapsOS")
+
+
 # ---------------------------------------------------------------------------
-# Dashboard view
+# Dashboard panel helpers (Layout-based)
 # ---------------------------------------------------------------------------
 
 
-def _draw_dashboard(ctx: dict):
+def _render_header_panel(ctx: dict, state_color: str) -> "Panel":
+    """Compact header: logo text + state glyph + date."""
+    state = ctx["current_state"]
+    sym = _state_symbol(state)
+    today = ctx["today"]
+    pending = ctx["pending"]
+
+    left = Text()
+    left.append("mapsOS", style=f"bold {AMBER}")
+    left.append("  ·  qualitative life OS", style=f"dim {PALE}")
+
+    right = Text()
+    right.append(f"{sym}  ", style=state_color)
+    right.append(state, style=f"bold {state_color}")
+    right.append(f"  ·  {today}", style=f"dim {PALE}")
+    if pending > 0:
+        right.append(f"  ⚡{pending}", style=f"dim {AMBER_DIM}")
+
+    from rich.columns import Columns as _Cols
+    row = _Cols([left, right])
+
+    return Panel(
+        row,
+        box=_rich_box.ROUNDED if _rich_box else None,
+        border_style=f"dim {state_color}",
+        padding=(0, 1),
+    )
+
+
+def _render_trend_panel(ctx: dict, state_color: str) -> "Panel":
+    """STATE sparkline panel (30 days)."""
+    from environments.viz import render_state_sparkline
+
+    entries = ctx.get("states_long", ctx["states"])
+    spark = render_state_sparkline(entries, days=30)
+
+    body = Text()
+    body.append("30 days\n\n", style=f"dim {PALE}")
+    if spark:
+        body.append_text(spark)
+        body.append("\n\n")
+        # Mini legend — one line
+        from environments.viz import ENERGY_LEVEL, _SPARK, _color_for_state
+        for tag, level in sorted(ENERGY_LEVEL.items(), key=lambda x: x[1]):
+            char = _SPARK[min(level, len(_SPARK) - 1)]
+            body.append(f"{char}", style=_color_for_state(tag))
+        body.append("  ", style="")
+        for tag, level in sorted(ENERGY_LEVEL.items(), key=lambda x: x[1]):
+            char = _SPARK[min(level, len(_SPARK) - 1)]
+            body.append(f" {tag}", style=f"dim {_color_for_state(tag)}")
+    else:
+        body.append("no state data", style="dim")
+
+    return Panel(
+        body,
+        title=f"[{AMBER_DIM}]STATE[/{AMBER_DIM}]",
+        box=_rich_box.ROUNDED if _rich_box else None,
+        border_style=state_color,
+        padding=(0, 1),
+    )
+
+
+def _render_body_panel(ctx: dict, state_color: str) -> "Panel":
+    """BODY heat grid panel (7 days)."""
+    from environments.viz import render_body_heatgrid
+
+    grid = render_body_heatgrid(ctx["body"], days=7)
+
+    if grid:
+        content = grid
+    else:
+        content = Text("no body data", style="dim")
+
+    return Panel(
+        content,
+        title=f"[{AMBER_DIM}]BODY[/{AMBER_DIM}]",
+        box=_rich_box.ROUNDED if _rich_box else None,
+        border_style=state_color,
+        padding=(0, 1),
+    )
+
+
+def _render_arcs_panel(ctx: dict, state_color: str) -> "Panel":
+    """Arc list with severity badges."""
+    arcs = ctx["arcs"]
+
+    if not arcs:
+        content = Text("all clear", style=f"dim {PALE}")
+        return Panel(
+            content,
+            title=f"[{AMBER_DIM}]ARCS[/{AMBER_DIM}]",
+            box=_rich_box.ROUNDED if _rich_box else None,
+            border_style=state_color,
+            padding=(0, 1),
+        )
+
+    tbl = Table(
+        box=None,
+        show_header=False,
+        pad_edge=False,
+        expand=True,
+        padding=(0, 1, 0, 0),
+    )
+    tbl.add_column("badge", width=2, no_wrap=True)
+    tbl.add_column("msg", overflow="fold")
+
+    for arc in arcs[:8]:
+        if arc.severity == "alert":
+            badge = Text("●", style=ALERT_COLOR)
+        elif arc.severity == "insight":
+            badge = Text("◆", style=INSIGHT_COLOR)
+        else:
+            badge = Text("▲", style=SURVIVAL_COLOR)
+
+        msg_text = arc.message
+        msg = Text(overflow="fold")
+        # Highlight [recurring × N] prefix in amber
+        if msg_text.startswith("[recurring"):
+            try:
+                end_idx = msg_text.index("]") + 1
+                msg.append(msg_text[:end_idx] + " ", style=f"bold {AMBER}")
+                msg.append(msg_text[end_idx:].strip(), style=f"dim {PALE}")
+            except ValueError:
+                msg.append(msg_text, style=f"dim {PALE}")
+        else:
+            msg.append(msg_text, style=f"dim {PALE}")
+
+        tbl.add_row(badge, msg)
+
+    return Panel(
+        tbl,
+        title=f"[{AMBER_DIM}]ARCS[/{AMBER_DIM}]",
+        box=_rich_box.ROUNDED if _rich_box else None,
+        border_style=state_color,
+        padding=(0, 1),
+    )
+
+
+def _render_intentions_panel(ctx: dict, state_color: str) -> "Panel":
+    """Today's intentions as a horizontal strip."""
+    today = ctx["today"]
+    intent_today = [e for e in ctx["intentions"] if today in e.get("content", "")]
+
+    body = Text()
+    if not intent_today:
+        body.append("nothing tracked today", style="dim")
+    else:
+        for e in intent_today[:6]:
+            content = e.get("content", "")
+            segs = [s.strip() for s in content.replace("INTENTION:", "", 1).split("|")]
+            name = segs[0] if segs else "?"
+            status = segs[1].lower() if len(segs) > 1 else "unknown"
+            sym_markup, _ = INTENTION_SYMBOLS.get(status, ("[dim]?[/dim]", status))
+            body.append(f"{sym_markup} ", style="")
+            body.append(f"{name}  ", style=f"dim {PALE}")
+
+    return Panel(
+        body,
+        title=f"[{AMBER_DIM}]INTENTIONS · today[/{AMBER_DIM}]",
+        box=_rich_box.ROUNDED if _rich_box else None,
+        border_style=f"dim {state_color}",
+        padding=(0, 1),
+    )
+
+
+def _render_hotkeys_text() -> "Text":
+    """Hotkey bar as plain Text (no panel border)."""
+    text = Text(justify="center")
+    for row_idx, pairs in enumerate((_HOTKEYS_ROW1, _HOTKEYS_ROW2)):
+        for key, label in pairs:
+            text.append(f"[{key}]", style=f"dim {AMBER_DIM}")
+            text.append(f"{label}  ", style="dim")
+        if row_idx == 0:
+            text.append("\n")
+    return text
+
+
+def _draw_dashboard_layout(ctx: dict):
+    """Layout-based dashboard using rich.layout. Falls back on import error."""
+    try:
+        from rich.layout import Layout
+    except ImportError:
+        _draw_dashboard_flat(ctx)
+        return
+
+    state = ctx["current_state"]
+    state_color = STATE_RGB.get(state, AMBER)
+
+    layout = Layout()
+    layout.split_column(
+        Layout(name="header", size=3),
+        Layout(name="content", ratio=1),
+        Layout(name="intentions", size=5),
+        Layout(name="hotkeys", size=2),
+    )
+    layout["content"].split_row(
+        Layout(name="trend", ratio=2),
+        Layout(name="body", ratio=2),
+        Layout(name="arcs", ratio=3),
+    )
+
+    layout["header"].update(_render_header_panel(ctx, state_color))
+    layout["trend"].update(_render_trend_panel(ctx, state_color))
+    layout["body"].update(_render_body_panel(ctx, state_color))
+    layout["arcs"].update(_render_arcs_panel(ctx, state_color))
+    layout["intentions"].update(_render_intentions_panel(ctx, state_color))
+    layout["hotkeys"].update(_render_hotkeys_text())
+
+    # Render at terminal height so layout fills exactly one screen
+    h = height()
+    if h < 20:
+        # Too small for layout — fall back
+        _draw_dashboard_flat(ctx)
+        return
+
+    dash_console = Console(
+        height=h,
+        highlight=False,
+        force_terminal=True,
+    )
     clr()
-    _draw_banner()
+    dash_console.print(layout)
 
+
+def _draw_dashboard_flat(ctx: dict):
+    """Original flat dashboard — fallback for small terminals or missing rich.layout."""
     today = ctx["today"]
     state = ctx["current_state"]
-    color = _state_color(state)
+    color = STATE_RGB.get(state, AMBER)
     sym = _state_symbol(state)
 
-    # ── today ──────────────────────────────────────────────────────────────
+    clr()
+    _draw_banner()
     rule(f"  {today}  ")
 
-    # STATE row
     if ctx["states"]:
         note = _extract_note(ctx["states"][-1])
         _content(f"[{color}]{sym}  {state:<12}[/{color}]  [dim]{note[:60]}[/dim]")
@@ -443,33 +804,29 @@ def _draw_dashboard(ctx: dict):
 
     rp("")
 
-    # BODY / MIND / SPIRIT compact row
-    body_today = [e for e in ctx["body"] if today in e.get("content", "")]
-    mind_today = [e for e in ctx["mind"] if today in e.get("content", "")]
-    spirit_today = [e for e in ctx["spirit"] if today in e.get("content", "")]
+    today_body = [e for e in ctx["body"] if today in e.get("content", "")]
+    today_mind = [e for e in ctx["mind"] if today in e.get("content", "")]
+    today_spirit = [e for e in ctx["spirit"] if today in e.get("content", "")]
 
     def _track_row(label: str, entries: list[dict]):
         if not entries:
             _content(f"[dim]{label:<8}  (nothing today)[/dim]")
             return
-        parts = []
+        parts_out = []
         for e in entries[:3]:
-            cat = _extract_category(e)
-            status = _extract_tag(e) if label == "BODY" else _extract_status(e)
-            # For BODY: content is "BODY: date | category | status | note"
             content = e.get("content", "")
             segs = [s.strip() for s in content.split("|")]
             if len(segs) >= 3:
-                cat = segs[1]
-                status = segs[2]
-            parts.append(f"[{PALE}]{cat}[/{PALE}]: [dim]{status}[/dim]")
-        _content(f"[{AMBER_DIM}]{label:<8}[/{AMBER_DIM}]  " + "  ·  ".join(parts))
+                cat, status = segs[1], segs[2]
+            else:
+                cat, status = "", ""
+            parts_out.append(f"[{PALE}]{cat}[/{PALE}]: [dim]{status}[/dim]")
+        _content(f"[{AMBER_DIM}]{label:<8}[/{AMBER_DIM}]  " + "  ·  ".join(parts_out))
 
-    _track_row("BODY", body_today)
-    _track_row("MIND", mind_today)
-    _track_row("SPIRIT", spirit_today)
+    _track_row("BODY", today_body)
+    _track_row("MIND", today_mind)
+    _track_row("SPIRIT", today_spirit)
 
-    # ── intentions ─────────────────────────────────────────────────────────
     intent_today = [e for e in ctx["intentions"] if today in e.get("content", "")]
     if intent_today:
         rp("")
@@ -482,7 +839,6 @@ def _draw_dashboard(ctx: dict):
             sym_markup, label = INTENTION_SYMBOLS.get(status, ("[dim]?[/dim]", status))
             _content(f"{sym_markup}  [{PALE}]{name:<14}[/{PALE}]  [dim]{label}[/dim]")
 
-    # ── patterns ───────────────────────────────────────────────────────────
     alerts = [a for a in ctx["arcs"] if a.severity == "alert"]
     insights = [a for a in ctx["arcs"] if a.severity == "insight"]
 
@@ -490,25 +846,34 @@ def _draw_dashboard(ctx: dict):
         rp("")
         rule("  patterns  ")
         if alerts:
-            _content(
-                f"[bold {STATE_COLORS['manic']}]![/bold {STATE_COLORS['manic']}]  {alerts[0].message}"
-            )
+            _content(f"[bold {ALERT_COLOR}]●[/bold {ALERT_COLOR}]  {alerts[0].message}")
         elif insights:
-            _content(f"[{AMBER}]·[/{AMBER}]  {insights[0].message}")
+            _content(f"[{INSIGHT_COLOR}]◆[/{INSIGHT_COLOR}]  {insights[0].message}")
 
-    # ── pending local store ────────────────────────────────────────────────
     if ctx["pending"] > 0:
         rp("")
         _content(
-            f"[dim]⚡ {ctx['pending']} entries in local store  (remote sync pending)  [/dim]"
+            f"[dim]⚡ {ctx['pending']} entries pending sync  [/dim]"
             f"[{AMBER_DIM}]\\[y] sync[/{AMBER_DIM}]"
         )
 
-    # ── keys ───────────────────────────────────────────────────────────────
     rp("")
     rule()
     _draw_hotkey_bar()
     rp("")
+
+
+# ---------------------------------------------------------------------------
+# Dashboard view
+# ---------------------------------------------------------------------------
+
+
+def _draw_dashboard(ctx: dict):
+    """Route to layout dashboard, with flat fallback."""
+    if HAS_RICH and _rich_box is not None:
+        _draw_dashboard_layout(ctx)
+    else:
+        _draw_dashboard_flat(ctx)
 
 
 # ---------------------------------------------------------------------------
@@ -518,53 +883,84 @@ def _draw_dashboard(ctx: dict):
 
 def _draw_survival(ctx: dict):
     clr()
-    w = _term_width()
     sv = ctx["survival"]
     days_str = f"day {sv.days_in_mode}" if sv.days_in_mode > 1 else ""
 
-    rp("")
-    rp("")
-
-    title = "·  s u r v i v a l  ·"
-    pad = max(0, (w - len(title)) // 2)
-    rp(
-        f"{' ' * pad}[{STATE_COLORS['depleted']}]{title}[/{STATE_COLORS['depleted']}]",
-        end="",
-    )
+    body = Text(justify="center")
+    body.append("\n")
+    body.append("·  s u r v i v a l  ·", style=f"bold {SURVIVAL_COLOR}")
     if days_str:
-        rp(f"  [dim]{days_str}[/dim]")
+        body.append(f"  {days_str}", style="dim")
+    body.append("\n\n")
+
+    items = ["eat something real", "drink water", "sleep when you can"]
+    for item in items:
+        body.append(f"→  {item}\n", style=f"{AMBER}")
+
+    body.append("\n")
+    body.append("that's the whole job.", style="dim")
+    body.append("  everything else can wait.", style="dim")
+    body.append("\n")
+
+    # Use Panel if rich.box available, else flat
+    if HAS_RICH and _rich_box is not None:
+        panel = Panel(
+            body,
+            box=_rich_box.ROUNDED,
+            border_style=SURVIVAL_COLOR,
+            padding=(1, 4),
+        )
+        clr()
+        w = _term_width()
+        # Center vertically
+        h = height()
+        pad_rows = max(0, (h - 12) // 2)
+        for _ in range(pad_rows):
+            rp("")
+        con().print(panel)
     else:
+        # Flat fallback
+        w = _term_width()
+        rp("")
+        rp("")
+        title = "·  s u r v i v a l  ·"
+        pad = " " * max(0, (w - len(title)) // 2)
+        rp(f"{pad}[{SURVIVAL_COLOR}]{title}[/{SURVIVAL_COLOR}]")
+        rp("")
+        rule()
+        rp("")
+        for item in items:
+            item_pad = " " * max(0, (w - len(item) - 6) // 2)
+            rp(f"{item_pad}[{AMBER}]→[/{AMBER}]  [{CREAM}]{item}[/{CREAM}]")
+        rp("")
+        rule()
+        rp("")
+        msg = "that's the whole job.  everything else can wait."
+        rp(f"{' ' * max(0, (w - len(msg)) // 2)}[dim]{msg}[/dim]")
+        rp("")
         rp("")
 
-    rp("")
-    rule()
-    rp("")
-
-    items = [
-        "eat something real",
-        "drink water",
-        "sleep when you can",
-    ]
-    for item in items:
-        item_pad = max(0, (w - len(item) - 6) // 2)
-        rp(f"{' ' * item_pad}[{AMBER}]→[/{AMBER}]  [{CREAM}]{item}[/{CREAM}]")
-
-    rp("")
-    rule()
-    rp("")
-
-    msg = "that's the whole job.  everything else can wait."
-    msg_pad = max(0, (w - len(msg)) // 2)
-    rp(f"{' ' * msg_pad}[dim]{msg}[/dim]")
-
-    rp("")
-    rp("")
     _content(
         f"[{AMBER_DIM}]\\[l][/{AMBER_DIM}] log state  "
         f"[{AMBER_DIM}]\\[v][/{AMBER_DIM}] vent  "
+        f"[{AMBER_DIM}]\\[i][/{AMBER_DIM}] ignore today  "
         f"[{AMBER_DIM}]\\[q][/{AMBER_DIM}] quit"
     )
     rp("")
+
+
+def _survival_ignore():
+    """Write a 24-hour survival mode override to the cooldown file."""
+    from environments.arc_cooldown import load_cooldowns, save_cooldowns
+
+    data = load_cooldowns()
+    data["survival_override"] = datetime.now(timezone.utc).isoformat()
+    save_cooldowns(data)
+
+    rp("")
+    _content("[dim]noted. full mode active for today. check in tomorrow.[/dim]")
+    rp("")
+    _pause(1.2)
 
 
 # ---------------------------------------------------------------------------
@@ -861,40 +1257,62 @@ def _screen_intention(ctx: dict) -> bool:
 
 
 def _page_size() -> int:
-    return max(5, (_term_width() // 2) - 4)
+    return max(8, height() - 12)
+
+_PAGE_BREAK = "__PAGE_BREAK__"
 
 
-def _paged_screen(title: str, lines: list[str]):
+def _paged_screen(
+    title: str,
+    lines: list[str],
+    actions: dict[str, Callable[[], None]] | None = None,
+    footer_note: str = "",
+):
     if not lines:
         return
 
     page_size = _page_size()
-    if len(lines) <= page_size:
-        for line in lines:
-            _content(line)
-        rp("")
-        rule()
-        _content("[dim]↩ back[/dim]")
-        _read_key()
+    pages: list[list[str]] = []
+    current: list[str] = []
+    for line in lines:
+        if line == _PAGE_BREAK:
+            if current:
+                pages.append(current)
+                current = []
+            continue
+        current.append(line)
+        if len(current) >= page_size:
+            pages.append(current)
+            current = []
+    if current:
+        pages.append(current)
+    if not pages:
         return
 
     page = 0
-    total_pages = (len(lines) + page_size - 1) // page_size
+    total_pages = len(pages)
     while True:
         clr()
         _draw_banner()
         rule(title)
         rp("")
 
-        start = page * page_size
-        end = start + page_size
-        for line in lines[start:end]:
+        for line in pages[page]:
             _content(line)
 
         rp("")
         rule()
-        _content(f"[dim]page {page + 1}/{total_pages}  ·  j next · k prev · ↩ back[/dim]")
+        footer = f"page {page + 1}/{total_pages}"
+        if total_pages > 1:
+            footer += "  ·  j next · k prev"
+        if footer_note:
+            footer += f"  ·  {footer_note}"
+        footer += "  ·  ↩ back"
+        _content(f"[dim]{footer}[/dim]")
         key = _read_key()
+        if actions and key in actions:
+            actions[key]()
+            continue
         if key == "j" and page < total_pages - 1:
             page += 1
             continue
@@ -910,16 +1328,17 @@ def _paged_screen(title: str, lines: list[str]):
 
 
 def _screen_review(ctx: dict):
-    clr()
-    _draw_banner()
-    rule("  cycle review  ")
-    rp("")
-
+    _draw_splash("loading review")
     states = _recall("STATE:", 14)
     body = _recall("BODY:", 14)
     spirit = _recall("SPIRIT:", 14)
     intentions = _recall("INTENTION:", 14)
     wins = _recall("WIN:", 14)
+
+    clr()
+    _draw_banner()
+    rule("  cycle review  ")
+    rp("")
 
     if not states:
         _content("[dim]no state data to review[/dim]")
@@ -993,11 +1412,6 @@ def _screen_review(ctx: dict):
 
 
 def _screen_help():
-    clr()
-    _draw_banner()
-    rule("  keys  ")
-    rp("")
-
     keys = [
         ("\\[v]ent", "free-form text → auto-parsed into STATE/BODY/MIND/SPIRIT"),
         ("\\[f]lash", "sub-threshold phrase capture — just a word, no structure"),
@@ -1015,6 +1429,8 @@ def _screen_help():
         ("\\[t]ulpa", "multi-line stream capture — dump until /done or blank line"),
         ("\\[T]rend", "show state trend chart"),
         ("\\[V]iz", "show viz dashboard"),
+        ("\\[a]bout", "about mapsOS"),
+        ("\\[d]ocs", "open GitHub / docs in browser"),
         ("\\[?] / \\[h]", "this screen"),
         ("\\[q]uit", "exit"),
     ]
@@ -1025,8 +1441,71 @@ def _screen_help():
         c = _state_color(tag)
         sym = _state_symbol(tag)
         lines.append(f"  [{c}]{sym}  {tag}[/{c}]")
+    lines.extend(
+        [
+            _PAGE_BREAK,
+            "",
+            "─" * 40,
+            "",
+            f"[bold {AMBER}]about[/bold {AMBER}]",
+            "",
+            f"[{PALE}]Most life-tracking tools are built around numbers.[/{PALE}]",
+            f"[{PALE}]Mood scores out of ten. Sleep quality percentages.[/{PALE}]",
+            f"[{PALE}]Streak counters. Completion rates.[/{PALE}]",
+            "",
+            f"[dim]That assumption doesn't hold for a lot of people.[/dim]",
+            "",
+            f"[{PALE}]mapsOS tracks narrative states, surfaces patterns across[/{PALE}]",
+            f"[{PALE}]days and weeks, and knows when to drop everything non-essential.[/{PALE}]",
+            "",
+            f"[dim]Not a mood tracker. Not a habit app. No scores out of ten.[/dim]",
+            "",
+            f"[bold {AMBER}]docs[/bold {AMBER}]",
+            "",
+            f"[{AMBER_DIM}]→[/{AMBER_DIM}]  [{PALE}]github.com/nosleepcassette/mapsOS[/{PALE}]",
+            f"[{AMBER_DIM}]→[/{AMBER_DIM}]  [dim]README  ·  WALKTHROUGH  ·  SKILL.md[/dim]",
+            "",
+            f"[{AMBER_DIM}]\\[d][/{AMBER_DIM}] open docs in browser",
+            "",
+            f"[dim]maps · cassette.help · MIT[/dim]",
+        ]
+    )
 
-    _paged_screen("  keys  ", lines)
+    _paged_screen("  keys  ", lines, actions={"d": _open_docs}, footer_note="d docs")
+
+
+def _screen_about():
+    lines = [
+        f"[bold {AMBER}]mapsOS[/bold {AMBER}]  [{PALE}]qualitative life OS[/{PALE}]",
+        "",
+        f"[{PALE}]Most life-tracking tools are built around numbers.[/{PALE}]",
+        f"[{PALE}]Mood scores out of ten. Sleep quality percentages.[/{PALE}]",
+        f"[{PALE}]Streak counters. Completion rates.[/{PALE}]",
+        "",
+        f"[dim]That assumption doesn't hold for a lot of people.[/dim]",
+        f"[dim]It especially doesn't hold when the thing you're trying to track[/dim]",
+        f"[dim]is how you actually feel — not a proxy metric for it.[/dim]",
+        "",
+        f"[{PALE}]mapsOS tracks narrative states, surfaces patterns across days[/{PALE}]",
+        f"[{PALE}]and weeks, and knows when to drop everything non-essential.[/{PALE}]",
+        "",
+        f"[dim]Numeric mood scores became qualitative state tags.[/dim]",
+        f"[dim]Nine siloed health dimensions collapsed into three tracks.[/dim]",
+        f"[dim]Fixed-schedule briefings got replaced with session-triggered logic.[/dim]",
+        f"[dim]Streak tracking was removed entirely.[/dim]",
+        "",
+        f"[{PALE}]The result is a system that meets you where you are.[/{PALE}]",
+        f"[{PALE}]It doesn't ask you to score your mood.[/{PALE}]",
+        f"[{PALE}]It asks you to say what's happening, and it listens.[/{PALE}]",
+        "",
+        f"[{AMBER_DIM}]──[/{AMBER_DIM}]",
+        "",
+        f"[dim]Built by maps · cassette.help · MIT[/dim]",
+        f"[dim]github.com/nosleepcassette/mapsOS[/dim]",
+        "",
+        f"[{AMBER_DIM}]\\[d][/{AMBER_DIM}] open docs in browser",
+    ]
+    _paged_screen("  about  ", lines, actions={"d": _open_docs}, footer_note="d docs")
 
 
 # ---------------------------------------------------------------------------
@@ -1151,10 +1630,12 @@ def _screen_tulpa(ctx: dict) -> bool:
 
 
 def _screen_trend(ctx: dict):
-    from environments.viz import render_trend
+    from environments.viz import render_trend, render_state_distribution
     from environments.local_store import recall_resilient
 
+    _draw_splash("loading trend")
     entries, _ = recall_resilient("STATE:", limit=200)
+    clr()
     if not entries:
         rp("")
         _content("[dim]no state data[/dim]")
@@ -1162,33 +1643,49 @@ def _screen_trend(ctx: dict):
         _pause(0.8)
         return
 
+    clr()
     try:
         result = render_trend(entries, days=90)
         if result:
             rp("")
-            rp(result)
-            _pause(0)
+            con().print(result)
+            rp("")
     except Exception as e:
         _content(f"[dim]trend unavailable: {e}[/dim]")
-        _pause(0.8)
+    _pause(0)
 
 
 def _screen_viz(ctx: dict):
     from environments.viz import render_viz
     from environments.local_store import recall_resilient
+    from environments.arc_cooldown import load_history
 
+    _draw_splash("loading viz")
     body, _ = recall_resilient("BODY:", limit=30)
     state, _ = recall_resilient("STATE:", limit=30)
 
+    # Build arc_history as list of Arc-like objects from arc history file
     try:
-        result = render_viz(body, state, arc_history=None)
+        history = load_history()
+        from environments.pattern_weaver import Arc
+        arc_history = [
+            Arc(name=name, severity="insight", message=name)
+            for name in history.keys()
+            if history[name]  # has at least one fire date
+        ]
+    except Exception:
+        arc_history = []
+
+    try:
+        result = render_viz(body, state, arc_history=arc_history)
         if result:
             clr()
-            rp(result)
-            _pause(0)
+            _viz_con = Console(highlight=False, force_terminal=True, width=width())
+            _viz_con.print(result)
+            rp("")
     except Exception as e:
         _content(f"[dim]viz unavailable: {e}[/dim]")
-        _pause(0.8)
+    _pause(0)
 
 
 # ---------------------------------------------------------------------------
@@ -1227,7 +1724,8 @@ def run():
 
 
 def _run_loop():
-    ctx = _load_context()
+    _draw_splash("loading")
+    ctx = _animated_load(_load_context, "loading")
 
     while True:
         # Choose view
@@ -1238,6 +1736,7 @@ def _run_loop():
 
         key = _read_key()
         refresh = False
+        refresh_message = "loading"
 
         if key in ("q", "CTRL_C", "CTRL_D"):
             clr()
@@ -1261,11 +1760,21 @@ def _run_loop():
         elif key == "S":
             refresh = _screen_spirit(ctx)
 
+        elif key == "i" and ctx["survival"].active:
+            _survival_ignore()
+            refresh = True
+
         elif key == "i":
             refresh = _screen_intention(ctx)
 
         elif key == "r":
             _screen_review(ctx)
+
+        elif key == "a":
+            _screen_about()
+
+        elif key == "d":
+            _open_docs()
 
         elif key in ("?", "h"):
             _screen_help()
@@ -1286,10 +1795,15 @@ def _run_loop():
             refresh = True
 
         elif key == "c":
-            refresh = True  # force reload
+            refresh = True
+            refresh_message = "checking patterns"
 
         elif key == "l" and ctx["survival"].active:
             refresh = _screen_state(ctx)
 
         if refresh:
-            ctx = _load_context()
+            if refresh_message == "checking patterns":
+                _draw_splash(refresh_message)
+                ctx = _animated_load(_load_context, refresh_message)
+            else:
+                ctx = _load_context()

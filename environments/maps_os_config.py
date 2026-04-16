@@ -38,6 +38,46 @@ def load_config() -> dict[str, Any]:
         return _cache
 
 
+def _coerce_positive_int(value: Any, default: int) -> int:
+    try:
+        coerced = int(value)
+    except (TypeError, ValueError):
+        return default
+    return coerced if coerced > 0 else default
+
+
+def load_survival_config(cfg: dict[str, Any]) -> dict[str, Any]:
+    """
+    Returns survival config with defaults.
+
+    Optional keys:
+      survival.threshold: int
+      survival.window: int
+      survival.low_states: list[str]
+    """
+    sv = cfg.get("survival", {}) if isinstance(cfg, dict) else {}
+    if not isinstance(sv, dict):
+        sv = {}
+
+    raw_low_states = sv.get("low_states", ["depleted", "grieving", "surviving"])
+    if not isinstance(raw_low_states, list):
+        raw_low_states = ["depleted", "grieving", "surviving"]
+
+    low_states = {
+        str(state).strip().lower()
+        for state in raw_low_states
+        if str(state).strip()
+    }
+    if not low_states:
+        low_states = {"depleted", "grieving", "surviving"}
+
+    return {
+        "threshold": _coerce_positive_int(sv.get("threshold"), 3),
+        "window": _coerce_positive_int(sv.get("window"), 5),
+        "low_states": low_states,
+    }
+
+
 def known_people() -> list[str]:
     """Returns config.get('known_people', []) lowercased."""
     config = load_config()

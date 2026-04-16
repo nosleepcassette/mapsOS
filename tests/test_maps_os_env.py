@@ -365,18 +365,36 @@ class TestSurvivalMode:
         result = eval_survival([_state_entry("depleted")])
         assert result.active is False
 
-    def test_active_two_depleted(self):
-        states = [_state_entry("depleted"), _state_entry("depleted", "2026-04-10")]
+    def test_active_three_low_states_in_last_five(self):
+        states = [
+            _state_entry("stable", "2026-04-07"),
+            _state_entry("depleted", "2026-04-08"),
+            _state_entry("surviving", "2026-04-09"),
+            _state_entry("grounded", "2026-04-10"),
+            _state_entry("depleted", "2026-04-11"),
+        ]
         result = eval_survival(states)
         assert result.active is True
 
-    def test_active_two_grieving(self):
-        states = [_state_entry("grieving"), _state_entry("grieving", "2026-04-10")]
+    def test_active_three_grieving(self):
+        states = [
+            _state_entry("stable", "2026-04-07"),
+            _state_entry("grieving", "2026-04-08"),
+            _state_entry("grounded", "2026-04-09"),
+            _state_entry("grieving", "2026-04-10"),
+            _state_entry("grieving", "2026-04-11"),
+        ]
         result = eval_survival(states)
         assert result.active is True
 
     def test_active_depleted_grieving_mix(self):
-        states = [_state_entry("depleted"), _state_entry("grieving", "2026-04-10")]
+        states = [
+            _state_entry("clear", "2026-04-07"),
+            _state_entry("depleted", "2026-04-08"),
+            _state_entry("flooded", "2026-04-09"),
+            _state_entry("grieving", "2026-04-10"),
+            _state_entry("depleted", "2026-04-11"),
+        ]
         result = eval_survival(states)
         assert result.active is True
 
@@ -418,6 +436,7 @@ class TestSurvivalMode:
     def test_should_not_exit_when_still_low(self):
         assert should_exit("depleted", was_in_survival=True) is False
         assert should_exit("grieving", was_in_survival=True) is False
+        assert should_exit("surviving", was_in_survival=True) is False
 
     def test_should_not_exit_when_not_in_survival(self):
         assert should_exit("stable", was_in_survival=False) is False

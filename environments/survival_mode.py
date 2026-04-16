@@ -7,10 +7,8 @@ It contracts the system: only eat/sleep/water tracked, no productivity language.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
-
-from .pattern_weaver import check_survival_trigger
 
 SURVIVAL_BRIEFING = """Three things today:
 → eat something real
@@ -20,6 +18,10 @@ SURVIVAL_BRIEFING = """Three things today:
 That's the whole job. Everything else can wait."""
 
 EXIT_MESSAGE = "Logged {state}. Survival mode standing down."
+
+LOW_STATES = {"depleted", "grieving", "surviving"}
+SURVIVAL_WINDOW = 5
+SURVIVAL_THRESHOLD = 3
 
 # Logs that are allowed during survival mode
 SURVIVAL_ALLOWED_TRACKS = frozenset(["STATE", "BODY"])
@@ -33,29 +35,29 @@ class SurvivalModeState:
     trigger_state: Optional[str] = None
 
 
-def evaluate(state_entries: list) -> SurvivalModeState:
+def evaluate(
+    state_entries: list,
+    low_states: set | None = None,
+    window: int = SURVIVAL_WINDOW,
+    threshold: int = SURVIVAL_THRESHOLD,
+) -> SurvivalModeState:
     """
     Given recent STATE entries, return the current SurvivalModeState.
     """
-    triggered = check_survival_trigger(state_entries)
+    if low_states is None:
+        low_states = LOW_STATES
 
-    if not triggered:
+    recent = state_entries[-window:] if window > 0 else []
+    low_count = sum(1 for entry in recent if _extract_tag(entry) in low_states)
+    active = low_count >= threshold
+    if not active:
         return SurvivalModeState(active=False)
-
-    # Count how many consecutive low states from the end
-    days = 0
-    for entry in reversed(state_entries):
-        tag = _extract_tag(entry)
-        if tag in ("depleted", "grieving"):
-            days += 1
-        else:
-            break
 
     trigger_tag = _extract_tag(state_entries[-1]) if state_entries else None
 
     return SurvivalModeState(
         active=True,
-        days_in_mode=days,
+        days_in_mode=low_count,
         trigger_state=trigger_tag,
     )
 
@@ -64,7 +66,7 @@ def should_exit(current_state_tag: str, was_in_survival: bool) -> bool:
     """Returns True if survival mode should exit."""
     if not was_in_survival:
         return False
-    return current_state_tag not in ("depleted", "grieving")
+    return current_state_tag not in LOW_STATES
 
 
 def exit_message(state_tag: str) -> str:
