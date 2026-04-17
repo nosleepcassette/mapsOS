@@ -58,6 +58,7 @@ from environments.local_store import (
     count_pending,
     garden_available,
 )
+from environments.export import load_atlas_task_hints, load_brief_text, write_session_export
 from environments.viz import render_trend, render_viz, render_trend_simple
 
 
@@ -1091,6 +1092,13 @@ def cmd_check(args, quiet: bool = False) -> int:
     goal_entries      = _recall("GOAL:",      args.graph, limit=21)
     person_entries    = _recall("PERSON:",    args.graph, limit=21)
     resistance_entries = _recall("RESISTANCE:", args.graph, limit=21)
+    atlas_tasks = load_atlas_task_hints()
+    brief_text = load_brief_text(getattr(args, "load_brief", None))
+
+    if brief_text and not quiet:
+        print("atlas brief:")
+        print(brief_text)
+        print()
 
     survival = _evaluate_survival(state_entries)
     if survival.active:
@@ -1126,6 +1134,13 @@ def cmd_check(args, quiet: bool = False) -> int:
         print(f"→ {alerts[0].message}")
     elif insights and not quiet:
         print(f"→ {insights[0].message}")
+
+    if atlas_tasks and not quiet:
+        print()
+        print("atlas carry-over:")
+        for task in atlas_tasks[:5]:
+            due = f" due {task['due']}" if task.get("due") else ""
+            print(f"  - {task['title']}{due}")
 
     # Show pending local entries as quiet reminder
     n_pending = count_pending(graph=args.graph)
@@ -1211,6 +1226,12 @@ def cmd_review(args) -> int:
         print(f"→ {item} was mostly absent")
     if not absent:
         print("→ no major absences detected")
+    return 0
+
+
+def cmd_export(args) -> int:
+    path = write_session_export(graph=args.graph, brief_path=getattr(args, "load_brief", None))
+    print(f"exported session: {path}")
     return 0
 
 
@@ -1315,6 +1336,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--no-pattern", action="store_true")
     p.add_argument("--no-survival-check", action="store_true")
+    p.add_argument("--load-brief", default=None, help="load an atlas daily brief from disk")
 
     sub = p.add_subparsers(dest="command")
 
@@ -1357,6 +1379,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     sy = sub.add_parser("sync", help="flush deferred local entries")
     sy.add_argument("--status", action="store_true", help="show pending count only")
+
+    sub.add_parser("export", help="write a cartographer session export JSON")
 
     sub.add_parser("tulpa",    help="multi-line stream capture (tulpa protocol)")
 
@@ -1412,6 +1436,7 @@ COMMAND_MAP = {
     "check":     cmd_check,
     "pattern":   cmd_pattern,
     "review":    cmd_review,
+    "export":    cmd_export,
     "survival":  cmd_survival,
     "roles":     cmd_roles,
     "sync":      cmd_sync,
@@ -1436,6 +1461,14 @@ def main():
             try:
                 from environments.tui import run as tui_run
                 tui_run()
+                try:
+                    export_path = write_session_export(
+                        graph=args.graph,
+                        brief_path=getattr(args, "load_brief", None),
+                    )
+                    print(f"session export: {export_path}")
+                except Exception as exc:
+                    print(f"warning: failed to write session export: {exc}", file=sys.stderr)
                 return 0
             except Exception:
                 pass

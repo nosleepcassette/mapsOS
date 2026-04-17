@@ -95,9 +95,11 @@ maps intention movement met "walked 45min"
 # session + pattern
 maps check                    # session start: context pull + arc check
 maps check --role             # + agent mode guidance (STATE → role, energy tier, refs to load)
+maps check --load-brief ~/atlas/daily/brief-2026-04-17.md
 maps pattern                  # full pattern weaver output
 maps review                   # cycle review (last 14 days)
 maps survival                 # check / display survival mode
+maps export                   # write ~/.mapsOS/exports/session_*.json for cartographer ingest
 
 # extended capture
 maps tulpa                    # multi-line stream capture
@@ -136,6 +138,7 @@ maps sync --status            # pending entry count
 ```
 
 Running `maps` with no arguments in a TTY launches the TUI.
+On TUI exit, mapsOS now writes a structured session export automatically.
 
 ---
 
@@ -249,6 +252,17 @@ Arc fire history is tracked separately in `~/.maps_os_arc_history.json`. Any ins
 
 All entries write to `~/.maps_os_local.db` by default. If you have a remote backend configured, `maps sync` flushes the queue. The system never loses data whether or not a backend is available.
 
+## Cartographer Bridge
+
+mapsOS now participates in the closed loop with cartographer:
+
+- `cart daily-brief` generates an atlas session brief
+- `maps check --load-brief <file>` shows that brief at session start
+- `maps export` writes `~/.mapsOS/exports/session_YYYYMMDD_HHMMSS.json`
+- `cart mapsos ingest-exports --latest` pulls that export back into atlas
+
+`maps check` also surfaces carry-over task hints from `~/atlas/tasks/mapsos.md` when present.
+
 ---
 
 ## Person Context
@@ -333,7 +347,7 @@ See [`docs/RL_SPEC.md`](docs/RL_SPEC.md) for the full design rationale and imple
 python3 -m pytest tests/ -v
 ```
 
-170 tests covering: vent parser, pattern weaver (ARCs 1–25), arc cooldown, survival mode, CLI commands, local store, RL environment.
+174 tests covering: vent parser, pattern weaver (ARCs 1–25), arc cooldown, survival mode, CLI commands, export bridge, local store, RL environment.
 
 ---
 

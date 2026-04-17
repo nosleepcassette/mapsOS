@@ -348,3 +348,57 @@ def test_person_profile_matches_exact_name_not_prefix(monkeypatch, capsys):
     assert "maggie's connection" in out
     assert "slo context" in out
     assert "sf context" not in out
+
+
+def test_check_prints_loaded_brief_and_atlas_carry_over(monkeypatch, capsys):
+    recalled = {
+        "STATE:": [{"content": "STATE: 2026-04-17 | stable | note"}],
+        "BODY:": [],
+        "MIND:": [],
+        "SPIRIT:": [],
+        "INTENTION:": [],
+        "FLASH:": [],
+        "DECISION:": [],
+        "TRIGGER:": [],
+        "GOAL:": [],
+        "PERSON:": [],
+        "RESISTANCE:": [],
+    }
+    monkeypatch.setattr(maps_cli, "_recall", lambda prefix, graph, limit: recalled[prefix])
+    monkeypatch.setattr(
+        maps_cli,
+        "eval_survival",
+        lambda entries: SimpleNamespace(active=False),
+    )
+    monkeypatch.setattr(maps_cli, "weave", lambda *args, **kwargs: [])
+    monkeypatch.setattr(maps_cli, "count_pending", lambda graph: 0)
+    monkeypatch.setattr(maps_cli, "load_brief_text", lambda path: "# atlas brief\n\n- ship phase 3")
+    monkeypatch.setattr(
+        maps_cli,
+        "load_atlas_task_hints",
+        lambda: [{"title": "send invoice", "due": "2026-04-18"}],
+    )
+
+    args = SimpleNamespace(graph="cassette", role=False, load_brief="~/atlas/daily/brief.md")
+    rc = maps_cli.cmd_check(args)
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "atlas brief:" in out
+    assert "ship phase 3" in out
+    assert "atlas carry-over:" in out
+    assert "send invoice due 2026-04-18" in out
+
+
+def test_cmd_export_reports_written_path(monkeypatch, capsys):
+    monkeypatch.setattr(
+        maps_cli,
+        "write_session_export",
+        lambda **kwargs: Path("/tmp/session_20260417_120000.json"),
+    )
+    args = SimpleNamespace(graph="cassette", load_brief=None)
+    rc = maps_cli.cmd_export(args)
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "session_20260417_120000.json" in out
