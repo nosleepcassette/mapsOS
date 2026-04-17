@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timezone
 from typing import Any
 
@@ -29,6 +30,14 @@ except ImportError:  # pragma: no cover - optional dependency
 
 VERSION = "0.1.0"
 _DATE_RE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+_CHECK_TRACKS: tuple[tuple[str, int], ...] = (
+    ("STATE:", 14),
+    ("BODY:", 14),
+    ("MIND:", 14),
+    ("SPIRIT:", 14),
+    ("INTENTION:", 21),
+    ("FLASH:", 14),
+)
 
 
 def is_available() -> bool:
@@ -93,12 +102,17 @@ def _collect_entries(prefix: str, *, limit: int, days: int | None = None, graph:
 
 
 def check_payload(*, graph: str = "cassette") -> dict[str, Any]:
-    states = _collect_entries("STATE:", limit=14, graph=graph)
-    body = _collect_entries("BODY:", limit=14, graph=graph)
-    mind = _collect_entries("MIND:", limit=14, graph=graph)
-    spirit = _collect_entries("SPIRIT:", limit=14, graph=graph)
-    intentions = _collect_entries("INTENTION:", limit=21, graph=graph)
-    flash = _collect_entries("FLASH:", limit=14, graph=graph)
+    with ThreadPoolExecutor(max_workers=len(_CHECK_TRACKS)) as executor:
+        futures = {
+            prefix: executor.submit(_collect_entries, prefix, limit=limit, graph=graph)
+            for prefix, limit in _CHECK_TRACKS
+        }
+        states = futures["STATE:"].result()
+        body = futures["BODY:"].result()
+        mind = futures["MIND:"].result()
+        spirit = futures["SPIRIT:"].result()
+        intentions = futures["INTENTION:"].result()
+        flash = futures["FLASH:"].result()
 
     arcs = weave(
         states,
