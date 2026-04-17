@@ -8,6 +8,12 @@ Not a habit tracker. Not a mood journal. Not a productivity app.
 
 mapsOS tracks narrative states, surfaces patterns across days and weeks, and knows when to drop everything non-essential. Runs as a standalone CLI and TUI with local SQLite storage and an optional remote backend.
 
+Paired with cartographer, it becomes the qualitative layer of atlas:
+
+- mapsOS = how you're actually doing
+- cartographer = what happened, what matters, what the agents learned
+- atlas = the shared substrate underneath both
+
 <table>
 <tr>
 <td align="center"><img src="docs/screenshots/splash.png" width="440"><br><sub>splash + loading</sub></td>
@@ -51,6 +57,19 @@ pattern. Share it with your community.
 
 ---
 
+## what shipped in this push
+
+This release turns mapsOS from a standalone tracker into one half of a tighter atlas loop.
+
+- **Atlas handoff in the TUI.** Press `C` inside mapsOS to launch `cart tui`, then return to mapsOS when you exit.
+- **Auto-ingest on exit.** mapsOS now writes its structured export and ingests it back into cartographer automatically when `cart` is available.
+- **Atlas context in the dashboard.** Open P0/P1 task counts and recent session context can surface directly inside the mapsOS TUI.
+- **State vocabulary is configurable.** The shipped 10 STATE tags are now defaults, not law.
+- **Tracks are configurable.** BODY / MIND / SPIRIT are the default shape, but your config can define its own categories.
+- **Capacity language is configurable.** If "survival mode" is right, use it. If "low capacity mode" is better, flip one config value and keep the behavior.
+
+---
+
 ## What It Tracks
 
 ### STATE
@@ -75,6 +94,8 @@ Three tracks that can diverge wildly from each other.
 - **BODY** — sleep, pain, hunger, movement, substances, energy
 - **MIND** — focus, clarity, overwhelm, flow
 - **SPIRIT** — connection, creativity, purpose, isolation
+
+These are defaults, not hardcoded doctrine. The example config now shows how to swap categories or add whole new tracks.
 
 ### Extended Tracking
 Extracted automatically from vent text or logged via CLI:
@@ -160,6 +181,28 @@ On TUI exit, mapsOS writes a structured session export and ingests it into carto
 
 ---
 
+## atlas integration
+
+mapsOS is strongest when it is not the only thing running.
+
+With cartographer installed:
+
+- `maps export` writes structured session state for atlas ingest
+- quitting the mapsOS TUI auto-ingests the latest export
+- `C` inside mapsOS launches `cart tui`
+- `cart tui` can launch mapsOS back with `m`
+- cartographer daily briefs can be loaded into mapsOS at session start
+
+The point is not "two tools that happen to integrate."
+The point is one local-first system where qualitative state and durable memory are finally in the same loop.
+
+Repos:
+
+- mapsOS: <https://github.com/nosleepcassette/mapsOS>
+- cartographer: <https://github.com/nosleepcassette/cartographer>
+
+---
+
 ## TUI
 
 ```bash
@@ -190,6 +233,27 @@ Warm amber palette. STATE-specific colors. Layout-based dashboard with live spar
 | `d`        | open docs in browser              |
 | `?` / `h`  | help + docs                       |
 | `q`        | quit                              |
+
+---
+
+## configuration
+
+The new config surface is one of the biggest changes in this release.
+
+You can now define:
+
+- your own STATE vocabulary
+- your own track categories
+- which states count as low-capacity / survival conditions
+- whether the UI says "survival mode" or "low capacity mode"
+- cartographer integration toggles and atlas root path
+
+See:
+
+- `~/.maps_os_config.yaml`
+- `environments/maps_os_config.example.yaml`
+
+This is the core ethos of the project in practice: built for one brain, configurable for yours.
 
 ---
 
