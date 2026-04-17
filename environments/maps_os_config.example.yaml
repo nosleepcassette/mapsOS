@@ -1,0 +1,60 @@
+# mapsOS configuration — copy to ~/.maps_os_config.yaml and edit
+# all keys are optional — defaults shown
+
+identity:
+  name: "maps"
+  timezone: "America/Los_Angeles"
+
+state:
+  tags:
+    surviving: "minimal function, getting through"
+    stable: "neutral baseline, nothing wrong, nothing lit"
+    grounded: "anchored, present — active quality distinct from stable"
+    thriving: "genuine forward momentum, things clicking"
+    tender: "emotionally soft, open, post-connection warmth"
+    grieving: "loss-adjacent (person, phase, possibility)"
+    manic: "elevated, fast, possibly unsustainable"
+    depleted: "tank empty, may still be functional"
+    flooded: "overwhelmed, can't process"
+    clear: "sharp, minimal noise"
+  default: stable
+
+capacity:
+  # survival_mode: true  -> labels this "survival mode" (honest, ND language)
+  # survival_mode: false -> labels this "low capacity mode" (default)
+  # Built as survival mode for some brains; low capacity for others. Your call.
+  survival_mode: false
+  mode_label: "low capacity"
+  low_states: [depleted, grieving, surviving]
+  threshold: 3
+  window: 5
+
+tracks:
+  - name: BODY
+    categories: [sleep, pain, energy, movement, food, substance]
+  - name: MIND
+    categories: [focus, anxiety, clarity, load, creativity]
+  - name: SPIRIT
+    categories: [connection, meaning, play, solitude, gratitude]
+  # Add your own tracks:
+  # - name: WORK
+  #   categories: [output, meetings, blockers, wins]
+  # - name: CREATIVE
+  #   categories: [flow, blocks, output, inspiration]
+
+integrations:
+  cart:
+    enabled: true
+    atlas_root: "~/atlas"
+    auto_ingest: true
+    show_tasks: true
+  nota:
+    enabled: false
+  garden:
+    enabled: false
+    graph: "cassette"
+
+ui:
+  theme: amber
+  splash: true
+  logo: true

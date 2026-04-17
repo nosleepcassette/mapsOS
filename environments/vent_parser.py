@@ -14,9 +14,22 @@ from datetime import date
 from typing import List, Optional
 
 try:
-    from environments.maps_os_config import known_people
+    from environments.maps_os_config import known_people, load_config, load_state_tags
 except Exception:
     known_people = lambda: []
+    load_config = lambda: {}
+    load_state_tags = lambda _cfg: {
+        "surviving": "",
+        "stable": "",
+        "grounded": "",
+        "tender": "",
+        "thriving": "",
+        "grieving": "",
+        "manic": "",
+        "depleted": "",
+        "flooded": "",
+        "clear": "",
+    }
 
 # WIN detection patterns — regex, intentionally conservative to avoid false positives
 _WIN_PATTERNS: list[str] = [
@@ -28,20 +41,7 @@ _WIN_PATTERNS: list[str] = [
 ]
 
 
-VALID_STATE_TAGS = frozenset(
-    [
-        "surviving",
-        "stable",
-        "grounded",
-        "tender",
-        "thriving",
-        "grieving",
-        "manic",
-        "depleted",
-        "flooded",
-        "clear",
-    ]
-)
+VALID_STATE_TAGS = frozenset(load_state_tags(load_config()).keys())
 
 # Keyword → STATE tag mapping (ordered: most-specific patterns first).
 # Important: patterns are checked in order and first match wins.

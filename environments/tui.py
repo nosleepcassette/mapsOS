@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
+import subprocess
 import sys
 import time
 import select
@@ -106,6 +108,43 @@ CREAM = "#f5e8c7"
 PALE = "#dbc59a"
 MUTED = "#9e8c78"
 
+try:
+    from environments.maps_os_config import (
+        load_capacity_config,
+        load_config as load_maps_config,
+        load_state_tags,
+        load_tracks_config,
+    )
+
+    _MAPS_CFG = load_maps_config()
+    _CAPACITY_CFG = load_capacity_config(_MAPS_CFG)
+    _STATE_TAGS = load_state_tags(_MAPS_CFG)
+    _TRACKS_CFG = load_tracks_config(_MAPS_CFG)
+except Exception:
+    _MAPS_CFG = {}
+    _CAPACITY_CFG = {
+        "mode_label": "low capacity",
+        "mode_short": "low capacity",
+        "survival_mode": False,
+    }
+    _STATE_TAGS = {tag: "" for tag in STATE_RGB}
+    _TRACKS_CFG = [
+        {"name": "BODY", "categories": ["sleep", "pain", "hunger", "movement", "substances", "energy"]},
+        {"name": "MIND", "categories": ["focus", "clarity", "overwhelm", "flow"]},
+        {"name": "SPIRIT", "categories": ["connection", "creativity", "purpose", "isolation"]},
+    ]
+
+CAPACITY_LABEL = str(_CAPACITY_CFG["mode_label"])
+CAPACITY_SHORT = str(_CAPACITY_CFG["mode_short"])
+STATE_TAGS = tuple(_STATE_TAGS.keys())
+TRACK_CATEGORIES = {
+    str(track.get("name", "")).upper(): [
+        str(category) for category in track.get("categories", [])
+    ]
+    for track in _TRACKS_CFG
+    if isinstance(track, dict)
+}
+
 # ---------------------------------------------------------------------------
 # Console + terminal helpers
 # ---------------------------------------------------------------------------
@@ -190,6 +229,16 @@ def _state_color(tag: str) -> str:
 
 def _state_symbol(tag: str) -> str:
     return STATE_SYMBOLS.get(tag.lower(), "·")
+
+
+def _capacity_banner() -> str:
+    compact = CAPACITY_SHORT.replace("-", " ").strip()
+    return f"·  {compact}  ·"
+
+
+def _track_categories(name: str, default: list[str]) -> list[str]:
+    categories = TRACK_CATEGORIES.get(name.upper(), [])
+    return categories if categories else default
 
 
 # ---------------------------------------------------------------------------
@@ -350,6 +399,25 @@ def _survival_overridden() -> bool:
         return False
 
 
+def _load_cart_context() -> dict:
+    try:
+        from environments.cart_bridge import (
+            cart_available,
+            get_open_tasks,
+            get_recent_sessions,
+        )
+    except Exception:
+        return {"available": False, "p0": [], "p1": [], "sessions": []}
+
+    if not cart_available():
+        return {"available": False, "p0": [], "p1": [], "sessions": []}
+
+    p0 = get_open_tasks("P0")
+    p1 = get_open_tasks("P1")
+    sessions = get_recent_sessions(3)
+    return {"available": True, "p0": p0, "p1": p1, "sessions": sessions}
+
+
 def _load_context() -> dict:
     """Pull all recent data in one pass."""
     states = _recall("STATE:", 7)
@@ -379,6 +447,7 @@ def _load_context() -> dict:
         "spirit": spirit,
         "intentions": intentions,
         "arcs": arcs,
+        "cart": _load_cart_context(),
         "survival": survival,
         "pending": pending,
         "current_state": _extract_tag(states[-1]) if states else "unknown",
@@ -502,6 +571,7 @@ _HOTKEYS_ROW2 = [
     ("r", "review"),
     ("T", "trend"),
     ("V", "viz"),
+    ("C", "atlas"),
     ("a", "about"),
     ("d", "docs"),
     ("y", "sync"),
@@ -726,6 +796,32 @@ def _render_intentions_panel(ctx: dict, state_color: str) -> "Panel":
     )
 
 
+def _render_cart_panel(ctx: dict, state_color: str) -> "Panel":
+    cart = ctx.get("cart", {})
+    body = Text()
+    if not cart.get("available"):
+        body.append("cart not connected  ·  install or expose `cart` on PATH", style="dim")
+    else:
+        p0 = len(cart.get("p0", []))
+        p1 = len(cart.get("p1", []))
+        sessions = cart.get("sessions", [])
+        last_session = Path(sessions[-1]["path"]).stem if sessions else "none"
+        body.append("atlas ", style=f"bold {AMBER}")
+        body.append(f"P0 {p0}", style=f"bold {ALERT_COLOR}" if p0 else f"dim {PALE}")
+        body.append("  ·  ", style=f"dim {PALE}")
+        body.append(f"P1 {p1}", style=f"bold {INSIGHT_COLOR}" if p1 else f"dim {PALE}")
+        body.append("  ·  ", style=f"dim {PALE}")
+        body.append(f"last {last_session}", style=f"dim {PALE}")
+
+    return Panel(
+        body,
+        title=f"[{AMBER_DIM}]ATLAS CONTEXT[/{AMBER_DIM}]",
+        box=_rich_box.ROUNDED if _rich_box else None,
+        border_style=f"dim {state_color}",
+        padding=(0, 1),
+    )
+
+
 def _render_hotkeys_text() -> "Text":
     """Hotkey bar as plain Text (no panel border)."""
     text = Text(justify="center")
@@ -754,6 +850,7 @@ def _draw_dashboard_layout(ctx: dict):
         Layout(name="header", size=3),
         Layout(name="content", ratio=1),
         Layout(name="intentions", size=5),
+        Layout(name="cart", size=3),
         Layout(name="hotkeys", size=2),
     )
     layout["content"].split_row(
@@ -767,6 +864,7 @@ def _draw_dashboard_layout(ctx: dict):
     layout["body"].update(_render_body_panel(ctx, state_color))
     layout["arcs"].update(_render_arcs_panel(ctx, state_color))
     layout["intentions"].update(_render_intentions_panel(ctx, state_color))
+    layout["cart"].update(_render_cart_panel(ctx, state_color))
     layout["hotkeys"].update(_render_hotkeys_text())
 
     # Render at terminal height so layout fills exactly one screen
@@ -857,6 +955,21 @@ def _draw_dashboard_flat(ctx: dict):
             f"[{AMBER_DIM}]\\[y] sync[/{AMBER_DIM}]"
         )
 
+    cart = ctx.get("cart", {})
+    rp("")
+    rule("  atlas context  ")
+    if cart.get("available"):
+        sessions = cart.get("sessions", [])
+        last_session = Path(sessions[-1]["path"]).stem if sessions else "none"
+        _content(
+            f"[{AMBER}]atlas[/{AMBER}]  "
+            f"[dim]P0 {len(cart.get('p0', []))}  ·  "
+            f"P1 {len(cart.get('p1', []))}  ·  last {last_session}  ·  "
+            f"\\[C] atlas[/dim]"
+        )
+    else:
+        _content("[dim]cart not connected  ·  expose `cart` on PATH[/dim]")
+
     rp("")
     rule()
     _draw_hotkey_bar()
@@ -885,10 +998,11 @@ def _draw_survival(ctx: dict):
     clr()
     sv = ctx["survival"]
     days_str = f"day {sv.days_in_mode}" if sv.days_in_mode > 1 else ""
+    banner = _capacity_banner()
 
     body = Text(justify="center")
     body.append("\n")
-    body.append("·  s u r v i v a l  ·", style=f"bold {SURVIVAL_COLOR}")
+    body.append(banner, style=f"bold {SURVIVAL_COLOR}")
     if days_str:
         body.append(f"  {days_str}", style="dim")
     body.append("\n\n")
@@ -923,7 +1037,7 @@ def _draw_survival(ctx: dict):
         w = _term_width()
         rp("")
         rp("")
-        title = "·  s u r v i v a l  ·"
+        title = banner
         pad = " " * max(0, (w - len(title)) // 2)
         rp(f"{pad}[{SURVIVAL_COLOR}]{title}[/{SURVIVAL_COLOR}]")
         rp("")
@@ -1070,14 +1184,12 @@ def _screen_flash(ctx: dict) -> bool:
 
 def _screen_state(ctx: dict) -> bool:
     """Select a STATE tag."""
-    from environments.vent_parser import VALID_STATE_TAGS
-
     clr()
     _draw_banner()
     rule("  state  ")
     rp("")
 
-    tags = sorted(VALID_STATE_TAGS)
+    tags = sorted(STATE_TAGS)
     for i, tag in enumerate(tags, 1):
         c = _state_color(tag)
         sym = _state_symbol(tag)
@@ -1131,17 +1243,26 @@ def _screen_state(ctx: dict) -> bool:
 
 
 def _screen_body(ctx: dict) -> bool:
-    categories = ["sleep", "pain", "hunger", "movement", "substances", "energy"]
+    categories = _track_categories(
+        "BODY",
+        ["sleep", "pain", "hunger", "movement", "substances", "energy"],
+    )
     return _screen_generic_track("BODY", "body", categories, ctx)
 
 
 def _screen_mind(ctx: dict) -> bool:
-    categories = ["focus", "clarity", "overwhelm", "flow"]
+    categories = _track_categories(
+        "MIND",
+        ["focus", "clarity", "overwhelm", "flow"],
+    )
     return _screen_generic_track("MIND", "mind", categories, ctx)
 
 
 def _screen_spirit(ctx: dict) -> bool:
-    categories = ["connection", "creativity", "purpose", "isolation"]
+    categories = _track_categories(
+        "SPIRIT",
+        ["connection", "creativity", "purpose", "isolation"],
+    )
     return _screen_generic_track("SPIRIT", "spirit", categories, ctx)
 
 
@@ -1794,6 +1915,14 @@ def _run_loop():
             _screen_viz(ctx)
             refresh = True
 
+        elif key == "C":
+            if shutil.which("cart"):
+                clr()
+                subprocess.run(["cart", "tui"], check=False)
+                clr()
+                _draw_banner()
+                refresh = True
+
         elif key == "c":
             refresh = True
             refresh_message = "checking patterns"
@@ -1807,3 +1936,11 @@ def _run_loop():
                 ctx = _animated_load(_load_context, refresh_message)
             else:
                 ctx = _load_context()
+
+    try:
+        from environments.cart_bridge import cart_available, ingest_export
+
+        if cart_available():
+            ingest_export()
+    except Exception:
+        pass

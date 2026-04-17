@@ -41,6 +41,7 @@ from environments.maps_os_config import (
     known_people,
     person_birth_hint,
     person_context,
+    load_capacity_config,
     load_config,
     load_survival_config,
 )
@@ -200,6 +201,10 @@ def _recall(prefix: str, graph: str, limit: int = 7) -> list[dict]:
 
 def _survival_settings() -> dict:
     return load_survival_config(load_config())
+
+
+def _capacity_settings() -> dict:
+    return load_capacity_config(load_config())
 
 
 def _evaluate_survival(state_entries: list):
@@ -417,7 +422,7 @@ def cmd_vent(args) -> int:
         survival = _evaluate_survival(recent_states)
         if survival.active:
             entries = filter_entries_for_survival(entries)
-            print("survival mode — logging state/body only")
+            print(f"{_capacity_settings()['mode_label']} — logging state/body only")
 
     for e in entries:
         content = e.to_garden()
@@ -594,7 +599,7 @@ def cmd_tulpa(args) -> int:
         survival = _evaluate_survival(recent_states)
         if survival.active:
             entries = filter_entries_for_survival(entries)
-            print("survival mode — logging state/body only")
+            print(f"{_capacity_settings()['mode_label']} — logging state/body only")
 
     print()
     for e in entries:
@@ -1238,13 +1243,14 @@ def cmd_export(args) -> int:
 def cmd_survival(args) -> int:
     state_entries = _recall("STATE:", args.graph, limit=max(5, _survival_settings()["window"]))
     survival = _evaluate_survival(state_entries)
+    capacity_label = _capacity_settings()["mode_label"]
     if survival.active:
-        print(f"survival mode active ({survival.days_in_mode} days)")
+        print(f"{capacity_label} active ({survival.days_in_mode} days)")
         print()
         print(survival_briefing())
     else:
         tag = _extract_tag(state_entries[-1]) if state_entries else "unknown"
-        print(f"survival mode inactive (last state: {tag})")
+        print(f"{capacity_label} inactive (last state: {tag})")
     return 0
 
 

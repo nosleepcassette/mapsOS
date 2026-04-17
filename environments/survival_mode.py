@@ -35,6 +35,15 @@ class SurvivalModeState:
     trigger_state: Optional[str] = None
 
 
+def _configured_low_states() -> set[str]:
+    try:
+        from .maps_os_config import load_config, load_survival_config
+
+        return set(load_survival_config(load_config())["low_states"])
+    except Exception:
+        return set(LOW_STATES)
+
+
 def evaluate(
     state_entries: list,
     low_states: set | None = None,
@@ -45,7 +54,7 @@ def evaluate(
     Given recent STATE entries, return the current SurvivalModeState.
     """
     if low_states is None:
-        low_states = LOW_STATES
+        low_states = _configured_low_states()
 
     recent = state_entries[-window:] if window > 0 else []
     low_count = sum(1 for entry in recent if _extract_tag(entry) in low_states)
@@ -62,11 +71,14 @@ def evaluate(
     )
 
 
-def should_exit(current_state_tag: str, was_in_survival: bool) -> bool:
+def should_exit(
+    current_state_tag: str, was_in_survival: bool, low_states: set | None = None
+) -> bool:
     """Returns True if survival mode should exit."""
     if not was_in_survival:
         return False
-    return current_state_tag not in LOW_STATES
+    active_low_states = low_states if low_states is not None else _configured_low_states()
+    return current_state_tag not in active_low_states
 
 
 def exit_message(state_tag: str) -> str:

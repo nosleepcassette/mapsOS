@@ -21,15 +21,33 @@ mapsOS tracks narrative states, surfaces patterns across days and weeks, and kno
 
 ---
 
-## Why this exists
+## why this exists
 
-Most life-tracking tools are built around numbers. Mood scores out of ten. Sleep quality percentages. Streak counters. Completion rates. The assumption is that if you measure enough dimensions precisely enough, patterns emerge and behavior changes.
+Most life-tracking tools assume you have capacity.
+mapsOS doesn't.
 
-That assumption doesn't hold for a lot of people — and it especially doesn't hold when the thing you're trying to track is how you actually feel, not a proxy metric for it.
+It tracks qualitative state - not scores, not percentages - and adjusts
+what it asks of you based on where you actually are. Built during a period
+of genuine crisis, by someone for whom "surviving" is a real state that
+needed a name.
 
-mapsOS started as a fork of a numeric wellness system and ended up as something almost philosophically opposite. Numeric mood scores became qualitative state tags. Nine siloed health dimensions collapsed into three tracks — BODY, MIND, SPIRIT — that can and do diverge wildly from each other. Fixed-schedule briefings (morning, midday, evening, weekly) got replaced with session-triggered logic that adapts to irregular sleep and work patterns. Streak tracking was removed entirely. The RL reward function explicitly penalizes productivity language when you're in a low state.
+That origin is why it works better than most tools even when things are fine.
+It was tested at the edges first.
 
-The result is a system that meets you where you are. It doesn't ask you to score your mood. It asks you to say what's happening, and it listens.
+---
+
+**Built for one brain, configured for yours.**
+
+Every state tag is configurable. Every track dimension is configurable.
+"Survival mode" is what it's called by default - but if that language
+doesn't fit your situation, a single config line turns it into
+"low capacity mode." Your call. Your vocabulary.
+
+The state vocabulary ships with 10 tags that cover a lot of human experience.
+Replace them all. Add your own. Build a profile for your specific neurodivergent
+pattern. Share it with your community.
+
+-> See `~/.maps_os_config.yaml`, `environments/maps_os_config.example.yaml`, and [DEVELOPERS.md](../cartographer/DEVELOPERS.md)
 
 ---
 
@@ -138,7 +156,7 @@ maps sync --status            # pending entry count
 ```
 
 Running `maps` with no arguments in a TTY launches the TUI.
-On TUI exit, mapsOS now writes a structured session export automatically.
+On TUI exit, mapsOS writes a structured session export and ingests it into cartographer automatically when `cart` is available.
 
 ---
 
@@ -150,7 +168,7 @@ python3 bin/maps
 
 Requires `rich`. No Textual dependency — raw termios + Rich.
 
-Warm amber palette. STATE-specific colors. Layout-based dashboard with live sparkline, body heat grid, and arc panel. Animated splash on load.
+Warm amber palette. STATE-specific colors. Layout-based dashboard with live sparkline, body heat grid, arc panel, and atlas context strip. Animated splash on load.
 
 | Key        | Action                            |
 |------------|-----------------------------------|
@@ -164,6 +182,7 @@ Warm amber palette. STATE-specific colors. Layout-based dashboard with live spar
 | `i`        | intention                         |
 | `r`        | review                            |
 | `c`        | refresh / pattern check           |
+| `C`        | launch atlas (`cart tui`)         |
 | `y`        | sync local store                  |
 | `T`        | trend chart                       |
 | `V`        | viz dashboard                     |
