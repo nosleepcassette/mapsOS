@@ -252,16 +252,29 @@ Arc fire history is tracked separately in `~/.maps_os_arc_history.json`. Any ins
 
 All entries write to `~/.maps_os_local.db` by default. If you have a remote backend configured, `maps sync` flushes the queue. The system never loses data whether or not a backend is available.
 
-## Cartographer Bridge
+## Cartographer Integration
 
-mapsOS now participates in the closed loop with cartographer:
+mapsOS is the qualitative layer. [cartographer](https://github.com/nosleepcassette/cartographer) is the memory layer. Together they form a closed loop:
 
-- `cart daily-brief` generates an atlas session brief
-- `maps check --load-brief <file>` shows that brief at session start
-- `maps export` writes `~/.mapsOS/exports/session_YYYYMMDD_HHMMSS.json`
-- `cart mapsos ingest-exports --latest` pulls that export back into atlas
+```
+session → maps export → cart ingest → atlas → daily brief → next session start
+```
 
-`maps check` also surfaces carry-over task hints from `~/atlas/tasks/mapsos.md` when present.
+**From mapsOS:**
+- `maps export` writes structured session data to `~/.mapsOS/exports/`
+- Includes STATE, BODY/MIND/SPIRIT, active arcs, intentions, events, people
+
+**Into cartographer:**
+- `cart mapsos ingest-exports --latest` pulls the latest export
+- `cart mapsos patterns --field state` shows state trend synthesis
+- `cart daily-brief` includes mapsOS-derived context
+
+**Back to agents:**
+- `cart daily-brief` output is loaded at Hermes session start
+- Agents see qualitative state alongside project context
+- Survival mode context is surfaced automatically
+
+This is the loop: your agents start every session knowing what you forgot, informed by both your projects and your actual state.
 
 ---
 
