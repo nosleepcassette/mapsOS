@@ -167,6 +167,13 @@ maps trend                    # STATE trend (last 30 days)
 maps trend --days 7           # shorter window
 maps viz                      # body/state/arc dashboard
 
+# server
+maps serve                    # run HTTP server in foreground
+maps serve install --host 127.0.0.1
+maps serve status
+maps serve restart
+maps serve uninstall
+
 # system
 maps eval                     # agent performance trend (last 30 days)
 maps eval --days 7
@@ -178,6 +185,26 @@ maps sync --status            # pending entry count
 
 Running `maps` with no arguments in a TTY launches the TUI.
 On TUI exit, mapsOS writes a structured session export and ingests it into cartographer automatically when `cart` is available.
+
+## launchd
+
+If you don't want to dedicate a terminal to `maps serve`, install it as a user LaunchAgent:
+
+```bash
+maps serve install --host 127.0.0.1
+maps serve status
+maps serve restart
+maps serve uninstall
+```
+
+`maps serve install` writes:
+
+- `~/Library/LaunchAgents/io.nosleepcassette.mapsos.serve.plist`
+- `~/.mapsOS/serve/token`
+- `~/.mapsOS/serve/launchd.stdout.log`
+- `~/.mapsOS/serve/launchd.stderr.log`
+
+The install command will reuse `MAPS_SERVE_TOKEN` from your shell if present; otherwise it generates one and saves it to `~/.mapsOS/serve/token`.
 
 ---
 

@@ -60,6 +60,15 @@ from environments.local_store import (
     garden_available,
 )
 from environments.export import load_atlas_task_hints, load_brief_text, write_session_export
+from environments.serve import check_payload, run as serve_run, trend_payload
+from environments.serve_launchd import (
+    install_serve_launchd,
+    restart_serve_launchd,
+    serve_launchd_status,
+    start_serve_launchd,
+    stop_serve_launchd,
+    uninstall_serve_launchd,
+)
 from environments.viz import render_trend, render_viz, render_trend_simple
 
 
@@ -754,6 +763,9 @@ def cmd_wins(args) -> int:
 def cmd_trend(args) -> int:
     """Show state trend chart."""
     days = args.days if hasattr(args, "days") else 90
+    if getattr(args, "json", False):
+        print(json.dumps(trend_payload(days=days, graph=args.graph), default=str))
+        return 0
 
     entries = _recall("STATE:", args.graph, limit=200)
     if not entries:
@@ -771,6 +783,55 @@ def cmd_trend(args) -> int:
         pass
 
     print(render_trend_simple(entries, days=days))
+    return 0
+
+
+def cmd_serve(args) -> int:
+    if args.action == "run":
+        serve_run(host=args.host, port=args.port)
+        return 0
+
+    if args.action == "install":
+        result = install_serve_launchd(host=args.host, port=args.port, token=args.token)
+        status = result["status"]
+        print("maps serve launchd installed")
+        print(f"label: {result['label']}")
+        print(f"url: http://{result['host']}:{result['port']}")
+        print(f"state: {'running' if status.running else (status.state or 'loaded')}")
+        print(f"plist: {result['plist_path']}")
+        print(f"token: {result['token_path']} ({result['token_source']})")
+        print(f"stdout: {result['stdout_path']}")
+        print(f"stderr: {result['stderr_path']}")
+        return 0
+
+    if args.action == "start":
+        status = start_serve_launchd()
+    elif args.action == "stop":
+        status = stop_serve_launchd()
+    elif args.action == "restart":
+        status = restart_serve_launchd()
+    elif args.action == "status":
+        status = serve_launchd_status()
+    elif args.action == "uninstall":
+        removed = uninstall_serve_launchd()
+        print("maps serve launchd removed")
+        print(f"plist: {removed['plist_path']}")
+        print(f"token: {removed['token_path']}")
+        print(f"stdout: {removed['stdout_path']}")
+        print(f"stderr: {removed['stderr_path']}")
+        return 0
+    else:
+        raise ValueError(f"unsupported serve action: {args.action}")
+
+    print(f"installed: {'yes' if status.installed else 'no'}")
+    print(f"loaded: {'yes' if status.loaded else 'no'}")
+    print(f"running: {'yes' if status.running else 'no'}")
+    print(f"state: {status.state or 'none'}")
+    print(f"pid: {status.pid or 'none'}")
+    print(f"plist: {status.plist_path}")
+    print(f"token: {status.token_path}")
+    print(f"stdout: {status.stdout_path}")
+    print(f"stderr: {status.stderr_path}")
     return 0
 
 
@@ -1086,6 +1147,10 @@ def cmd_events(args) -> int:
 
 
 def cmd_check(args, quiet: bool = False) -> int:
+    if getattr(args, "json", False):
+        print(json.dumps(check_payload(graph=args.graph), default=str))
+        return 0
+
     state_entries     = _recall("STATE:",     args.graph, limit=7)
     body_entries      = _recall("BODY:",      args.graph, limit=7)
     mind_entries      = _recall("MIND:",      args.graph, limit=7)
@@ -1378,6 +1443,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     ch = sub.add_parser("check", help="session start context + pattern check")
     ch.add_argument("--role", action="store_true", help="output embedded mode guidance")
+    ch.add_argument("--json", action="store_true", help="emit JSON payload")
     sub.add_parser("pattern",  help="full pattern weaver output")
     sub.add_parser("review",   help="cycle review (14 days)")
     sub.add_parser("survival", help="check/display survival mode")
@@ -1401,8 +1467,20 @@ def build_parser() -> argparse.ArgumentParser:
     tr = sub.add_parser("trend",  help="show state trend chart")
     tr.add_argument("--days", type=int, default=90, help="number of days (default 90)")
     tr.add_argument("--full", action="store_true", help="show all-time")
+    tr.add_argument("--json", action="store_true", help="emit JSON payload")
 
     sub.add_parser("viz",    help="show visualization dashboard")
+    sv = sub.add_parser("serve", help="run the optional mapsOS HTTP server")
+    sv.add_argument(
+        "action",
+        nargs="?",
+        choices=("run", "install", "start", "stop", "restart", "status", "uninstall"),
+        default="run",
+        help="run in foreground or manage the launchd agent",
+    )
+    sv.add_argument("--host", default="0.0.0.0")
+    sv.add_argument("--port", type=int, default=7432)
+    sv.add_argument("--token", help="MAPS_SERVE_TOKEN to embed into the launchd agent on install")
 
     co = sub.add_parser("connect", help="log connection with a person")
     co.add_argument("person", nargs="*", help="person name")
@@ -1450,6 +1528,7 @@ COMMAND_MAP = {
     "eval":      cmd_eval,
     "wins":      cmd_wins,
     "trend":     cmd_trend,
+    "serve":     cmd_serve,
     "viz":       cmd_viz,
     "connect":  cmd_connect,
     "person":   cmd_person,
