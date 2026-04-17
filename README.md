@@ -337,6 +337,43 @@ All entries write to `~/.maps_os_local.db` by default. If you have a remote back
 
 ## Cartographer Integration
 
+mapsOS pairs with cartographer to form a complete qualitative life + agent memory system:
+
+- **mapsOS** = how you're actually doing (state tracking, pattern detection)
+- **cartographer** = what happened, what matters, what agents learned
+- **atlas** = shared substrate underneath both
+
+---
+
+## Agent Skills
+
+For AI agents working with mapsOS, we publish skill definitions that can be imported into agent systems:
+
+| Skill | Description | Gist |
+|-------|-------------|------|
+| **mapsOS Agent Skill** | Complete skill for qualitative life tracking — vent parsing, pattern weaving, survival mode, 26 arcs | [View Gist](https://gist.github.com/nosleepcassette/76a629d9f0e101e037b2ecf5e384cea9) |
+
+These skills encode:
+- CLI usage and fallback patterns
+- STATE/BODY/MIND/SPIRIT schema with tag guides
+- Vent parsing logic with keyword mapping
+- Pattern detection rules (26 arcs)
+- Survival mode triggers and behavior
+- Response tone calibration
+- Tulpa capture protocol
+
+To use in Hermes Agent: place in `~/.hermes/skills/mapsOS/SKILL.md`
+
+To use in Claude Code: add to CLAUDE.md or import via MCP.
+
+---
+
+## Community Skills & Plugins
+
+**TODO:** Community repository for sharing mapsOS configurations, custom tracks, pattern definitions, and agent integrations.
+
+If you've built something with mapsOS — a custom schema, a new arc pattern, an agent integration — we want to surface it.
+
 mapsOS is the qualitative layer. [cartographer](https://github.com/nosleepcassette/cartographer) is the memory layer. Together they form a closed loop:
 
 ```

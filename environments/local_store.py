@@ -10,6 +10,7 @@ Storage: ~/.maps_os_local.db (SQLite)
 """
 from __future__ import annotations
 
+import shlex
 import sqlite3
 import subprocess
 from contextlib import contextmanager
@@ -272,16 +273,19 @@ def sync_to_garden(graph: str = "cassette", db_path: Path = DEFAULT_DB_PATH,
 
     for entry in unsynced:
         content = entry["content"]
-        cmd = f"garden remember '{content}' --graph {entry['graph']}"
+        graph = entry["graph"]
 
         if dry_run:
-            print(f"  [dry] {cmd}")
+            print(f" [dry] garden remember --graph {graph} '{content[:50]}...'")
             synced_ids.append(entry["id"])
             continue
 
         try:
             result = subprocess.run(
-                cmd, shell=True, capture_output=True, text=True, timeout=10
+                ["garden", "remember", content, "--graph", graph],
+                capture_output=True,
+                text=True,
+                timeout=10
             )
             if result.returncode == 0:
                 synced_ids.append(entry["id"])
