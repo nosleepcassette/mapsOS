@@ -59,8 +59,18 @@ from environments.local_store import (
     count_pending,
     garden_available,
 )
-from environments.export import load_atlas_task_hints, load_brief_text, write_session_export
-from environments.serve import check_payload, run as serve_run, trend_payload
+from environments.export import (
+    DEFAULT_EXPORT_DIR,
+    load_atlas_task_hints,
+    load_brief_text,
+    write_session_export,
+)
+from environments.serve import (
+    check_payload,
+    run as serve_run,
+    session_start_payload,
+    trend_payload,
+)
 from environments.serve_launchd import (
     install_serve_launchd,
     restart_serve_launchd,
@@ -240,6 +250,65 @@ def _parse_iso_date(value: str) -> date | None:
 
 def _reference_today(raw_date: str | None = None) -> date:
     return _parse_iso_date(raw_date or "") or date.today()
+
+
+def _latest_export_info() -> dict[str, object]:
+    export_dir = DEFAULT_EXPORT_DIR
+    files = sorted(export_dir.glob("*.json")) if export_dir.exists() else []
+    latest = files[-1] if files else None
+    return {
+        "dir": str(export_dir),
+        "exists": export_dir.exists(),
+        "count": len(files),
+        "latest": None if latest is None else str(latest),
+    }
+
+
+def _maps_doctor_payload(graph: str) -> dict[str, object]:
+    from environments.cart_bridge import bridge_health, get_doctor_payload
+
+    serve_status = serve_launchd_status()
+    exports = _latest_export_info()
+    cart = get_doctor_payload()
+    bridge = bridge_health()
+    pending = count_pending(graph=graph)
+    backend_available = garden_available()
+
+    warnings: list[str] = []
+    if not serve_status.installed:
+        warnings.append("maps serve launchd agent is not installed")
+    elif not serve_status.running:
+        warnings.append("maps serve launchd agent is not running")
+    if not exports["count"]:
+        warnings.append("no mapsOS exports found")
+    if pending:
+        warnings.append(f"{pending} local entries pending sync")
+    if not backend_available:
+        warnings.append("garden backend unavailable; using local store")
+    warnings.extend(str(item) for item in cart.get("warnings") or [])
+
+    return {
+        "generated_at": datetime.now().isoformat(timespec="seconds"),
+        "serve": {
+            "installed": serve_status.installed,
+            "loaded": serve_status.loaded,
+            "running": serve_status.running,
+            "pid": serve_status.pid,
+            "state": serve_status.state,
+            "plist_path": str(serve_status.plist_path),
+            "token_path": str(serve_status.token_path),
+            "stdout_path": str(serve_status.stdout_path),
+            "stderr_path": str(serve_status.stderr_path),
+        },
+        "exports": exports,
+        "local_store": {
+            "pending": pending,
+            "garden_available": backend_available,
+        },
+        "cart": cart,
+        "bridge": bridge,
+        "warnings": warnings,
+    }
 
 
 def _parse_win_entry(content: str) -> dict | None:
@@ -1228,6 +1297,105 @@ def cmd_check(args, quiet: bool = False) -> int:
     return 0
 
 
+def cmd_session_start(args) -> int:
+    payload = session_start_payload(graph=args.graph)
+    if getattr(args, "json", False):
+        print(json.dumps(payload, default=str))
+        return 0
+
+    print(f"state: {payload['state_tag']}")
+    print(f"summary: {payload['summary']}")
+    if payload["survival"]:
+        print("survival: active")
+
+    body = payload.get("body") or {}
+    if body:
+        body_summary = "  ".join(f"{key}:{value}" for key, value in sorted(body.items()))
+        print(f"body: {body_summary}")
+
+    arcs = payload.get("arcs") or []
+    if arcs:
+        print("arcs:")
+        for arc in arcs[:3]:
+            if not isinstance(arc, dict):
+                continue
+            message = str(arc.get("message") or arc.get("name") or "").strip()
+            if message:
+                print(f"  - {message}")
+
+    intentions = payload.get("intentions") or []
+    if intentions:
+        print("intentions:")
+        for item in intentions[:5]:
+            if not isinstance(item, dict):
+                continue
+            note = f"  ({item['status']})" if item.get("status") else ""
+            print(f"  - {item.get('name', 'unknown')}{note}")
+
+    cart = payload.get("cart") or {}
+    tasks = cart.get("tasks") if isinstance(cart, dict) else {}
+    p0 = tasks.get("p0") if isinstance(tasks, dict) else []
+    p1 = tasks.get("p1") if isinstance(tasks, dict) else []
+    if p0 or p1:
+        print("cart:")
+        if p0:
+            print(f"  P0: {len(p0)} open")
+        if p1:
+            print(f"  P1: {len(p1)} open")
+    return 0
+
+
+def cmd_doctor(args) -> int:
+    payload = _maps_doctor_payload(args.graph)
+    if getattr(args, "json", False):
+        print(json.dumps(payload, default=str))
+        return 0
+
+    serve = payload["serve"]
+    serve_state = "ok" if serve["running"] else ("warn" if serve["installed"] else "missing")
+    print(f"serve: {serve_state}  running={serve['running']}  pid={serve['pid'] or 'none'}")
+
+    exports = payload["exports"]
+    export_state = "ok" if exports["count"] else "warn"
+    print(f"exports: {export_state}  {exports['count']} files  latest={exports['latest'] or 'none'}")
+
+    local_store = payload["local_store"]
+    backend_state = "ok" if local_store["garden_available"] else "warn"
+    print(
+        "local-store: "
+        f"{backend_state}  pending={local_store['pending']}  garden={local_store['garden_available']}"
+    )
+
+    bridge = payload["bridge"]
+    bridge_state = "ok" if bridge["available"] and bridge["doctor"] else "warn"
+    print(
+        "bridge: "
+        f"{bridge_state}  available={bridge['available']}  doctor={bridge['doctor']}  "
+        f"tasks={bridge['tasks']}  sessions={bridge['sessions']}"
+    )
+
+    cart = payload["cart"]
+    if cart.get("available"):
+        index = cart.get("index") if isinstance(cart, dict) else {}
+        index_summary = (
+            f"{index.get('notes', 0)} notes, rebuilt {index.get('last_rebuild_text', 'unknown')}"
+            if isinstance(index, dict)
+            else "index unknown"
+        )
+        print(f"cart: ok  {cart.get('root', 'unknown')}  {index_summary}")
+    else:
+        print("cart: warn  unavailable")
+
+    warnings = payload.get("warnings") or []
+    if warnings:
+        print("warnings:")
+        for warning in warnings:
+            print(f"  - {warning}")
+    else:
+        print("warnings: none")
+    return 0
+
+
 def cmd_pattern(args) -> int:
     state_entries      = _recall("STATE:",     args.graph, limit=14)
     state_entries_long = _recall("STATE:",     args.graph, limit=60)  # for cycle_meta
@@ -1444,6 +1612,10 @@ def build_parser() -> argparse.ArgumentParser:
     ch = sub.add_parser("check", help="session start context + pattern check")
     ch.add_argument("--role", action="store_true", help="output embedded mode guidance")
     ch.add_argument("--json", action="store_true", help="emit JSON payload")
+    ss = sub.add_parser("session-start", help="composed session-start packet with cart bridge context")
+    ss.add_argument("--json", action="store_true", help="emit JSON payload")
+    dr = sub.add_parser("doctor", help="check serve, bridge, exports, and cart health")
+    dr.add_argument("--json", action="store_true", help="emit JSON payload")
     sub.add_parser("pattern",  help="full pattern weaver output")
     sub.add_parser("review",   help="cycle review (14 days)")
     sub.add_parser("survival", help="check/display survival mode")
@@ -1518,6 +1690,8 @@ COMMAND_MAP = {
     "spirit":    cmd_spirit,
     "intention": cmd_intention,
     "check":     cmd_check,
+    "session-start": cmd_session_start,
+    "doctor":    cmd_doctor,
     "pattern":   cmd_pattern,
     "review":    cmd_review,
     "export":    cmd_export,

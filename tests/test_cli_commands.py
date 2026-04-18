@@ -402,3 +402,48 @@ def test_cmd_export_reports_written_path(monkeypatch, capsys):
 
     assert rc == 0
     assert "session_20260417_120000.json" in out
+
+
+def test_session_start_json_uses_composed_payload(monkeypatch, capsys):
+    monkeypatch.setattr(
+        maps_cli,
+        "session_start_payload",
+        lambda graph="cassette": {"state_tag": "clear", "summary": "locked in"},
+    )
+
+    args = SimpleNamespace(graph="cassette", json=True)
+    rc = maps_cli.cmd_session_start(args)
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert '"state_tag": "clear"' in out
+    assert '"summary": "locked in"' in out
+
+
+def test_doctor_reports_bridge_and_exports(monkeypatch, capsys):
+    monkeypatch.setattr(
+        maps_cli,
+        "_maps_doctor_payload",
+        lambda graph: {
+            "serve": {"running": True, "installed": True, "pid": 42},
+            "exports": {"count": 3, "latest": "/tmp/export.json"},
+            "local_store": {"pending": 0, "garden_available": True},
+            "bridge": {"available": True, "doctor": True, "tasks": True, "sessions": True},
+            "cart": {
+                "available": True,
+                "root": "/tmp/atlas",
+                "index": {"notes": 12, "last_rebuild_text": "2026-04-17 21:00"},
+            },
+            "warnings": [],
+        },
+    )
+
+    args = SimpleNamespace(graph="cassette", json=False)
+    rc = maps_cli.cmd_doctor(args)
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert "serve: ok" in out
+    assert "exports: ok" in out
+    assert "bridge: ok" in out
+    assert "warnings: none" in out

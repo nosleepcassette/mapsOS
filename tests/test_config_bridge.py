@@ -63,12 +63,34 @@ def test_cart_bridge_parses_task_output_and_gracefully_handles_absence(monkeypat
     monkeypatch.setattr(
         cart_bridge.subprocess,
         "run",
-        lambda *args, **kwargs: _Result("t1 | open | P0 | ship\n\nt2 | open | P1 | test\n"),
+        lambda *args, **kwargs: _Result(
+            '{"tasks":[{"id":"t1","text":"ship","status":"open","priority":"P0","project":"atlas"},'
+            '{"id":"t2","text":"test","status":"open","priority":"P1"}]}'
+        ),
     )
 
     tasks = cart_bridge.get_open_tasks("P0")
 
-    assert tasks == [{"text": "t1 | open | P0 | ship"}, {"text": "t2 | open | P1 | test"}]
+    assert tasks == [
+        {
+            "id": "t1",
+            "text": "ship",
+            "status": "open",
+            "priority": "P0",
+            "project": "atlas",
+            "due": "",
+            "path": "",
+        },
+        {
+            "id": "t2",
+            "text": "test",
+            "status": "open",
+            "priority": "P1",
+            "project": "",
+            "due": "",
+            "path": "",
+        },
+    ]
 
 
 def test_should_exit_accepts_custom_low_state_set():

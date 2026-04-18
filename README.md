@@ -135,6 +135,8 @@ maps intention movement met "walked 45min"
 maps check                    # session start: context pull + arc check
 maps check --role             # + agent mode guidance (STATE → role, energy tier, refs to load)
 maps check --load-brief ~/atlas/daily/brief-2026-04-17.md
+maps session-start            # composed session-start packet with cart bridge context
+maps session-start --json
 maps pattern                  # full pattern weaver output
 maps review                   # cycle review (last 14 days)
 maps survival                 # check / display survival mode
@@ -175,6 +177,8 @@ maps serve restart
 maps serve uninstall
 
 # system
+maps doctor                   # serve + bridge + export + cart health check
+maps doctor --json
 maps eval                     # agent performance trend (last 30 days)
 maps eval --days 7
 maps connect <name>           # log connection + PERSON entry
@@ -205,6 +209,8 @@ maps serve uninstall
 - `~/.mapsOS/serve/launchd.stderr.log`
 
 The install command will reuse `MAPS_SERVE_TOKEN` from your shell if present; otherwise it generates one and saves it to `~/.mapsOS/serve/token`.
+
+The HTTP server now includes a richer `GET /session-start` endpoint in addition to the existing `GET /check`. It composes the latest state, arcs, body/intention context, Cart P0/P1 tasks, recent session notes, and bridge health into one packet for remote clients.
 
 ---
 

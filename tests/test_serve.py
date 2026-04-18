@@ -103,3 +103,60 @@ def test_check_payload_shapes_entries(monkeypatch):
         "arcs": [{"name": "test_arc", "severity": "insight", "message": "hello"}],
         "survival": False,
     }
+
+
+def test_session_start_payload_includes_bridge_and_latest_state(monkeypatch):
+    recalled = {
+        "STATE:": [{"content": "STATE: 2026-04-16 | clear | note", "id": 2, "ts": "2026-04-16T03:00:00Z"}],
+        "BODY:": [
+            {"content": "BODY: 2026-04-16 | sleep | rough | slept late", "id": 3, "ts": "2026-04-16T03:10:00Z"},
+            {"content": "BODY: 2026-04-17 | energy | steady | okay", "id": 4, "ts": "2026-04-17T03:10:00Z"},
+        ],
+        "INTENTION:": [{"content": "INTENTION: water | met | 2026-04-17 | hydrated", "id": 5, "ts": "2026-04-17T03:11:00Z"}],
+        "FLASH:": [{"content": "FLASH: 2026-04-17 | ship it", "id": 6, "ts": "2026-04-17T03:12:00Z"}],
+    }
+
+    def fake_collect(prefix, *, limit, days=None, graph="cassette"):
+        return list(recalled.get(prefix, []))
+
+    monkeypatch.setattr(serve, "_collect_entries", fake_collect)
+    monkeypatch.setattr(
+        serve,
+        "check_payload",
+        lambda graph="cassette": {
+            "state": recalled["STATE:"][0],
+            "arcs": [{"name": "test_arc", "severity": "insight", "message": "hello"}],
+            "survival": False,
+        },
+    )
+
+    import environments.cart_bridge as cart_bridge
+
+    monkeypatch.setattr(cart_bridge, "get_open_tasks", lambda priority=None: [{"text": f"{priority}-task"}])
+    monkeypatch.setattr(cart_bridge, "get_recent_sessions", lambda n=5: [{"path": "/tmp/session.md", "title": "Session"}])
+    monkeypatch.setattr(cart_bridge, "get_daily_brief", lambda: "brief")
+    monkeypatch.setattr(cart_bridge, "bridge_health", lambda: {"available": True, "doctor": True, "tasks": True, "sessions": True, "warnings": []})
+
+    payload = serve.session_start_payload()
+
+    assert payload["state_tag"] == "clear"
+    assert payload["summary"] == "note"
+    assert payload["body"] == {"sleep": "rough", "energy": "steady"}
+    assert payload["intentions"] == [
+        {"name": "water", "status": "met", "date": "2026-04-17", "note": "hydrated"}
+    ]
+    assert payload["flash"] == ["ship it"]
+    assert payload["cart"]["tasks"]["p0"] == [{"text": "P0-task"}]
+    assert payload["cart"]["recent_sessions"] == [{"path": "/tmp/session.md", "title": "Session"}]
+
+
+def test_session_start_endpoint_requires_token(monkeypatch):
+    monkeypatch.setenv("MAPS_SERVE_TOKEN", "secret")
+    monkeypatch.setattr(serve, "session_start_payload", lambda graph="cassette": {"state_tag": "clear"})
+    client = TestClient(serve.build_app())
+
+    assert client.get("/session-start").status_code == 401
+    ok = client.get("/session-start", headers={"Authorization": "Bearer secret"})
+
+    assert ok.status_code == 200
+    assert ok.json() == {"state_tag": "clear"}

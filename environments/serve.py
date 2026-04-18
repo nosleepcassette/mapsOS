@@ -78,6 +78,78 @@ def _entry_sort_key(entry: dict[str, Any]) -> tuple[str, int]:
     return (str(entry.get("ts") or ""), int(entry.get("id") or 0))
 
 
+def _entry_content_parts(entry: dict[str, Any], *, maxsplit: int) -> list[str]:
+    return [part.strip() for part in str(entry.get("content") or "").split("|", maxsplit)]
+
+
+def _latest_body_state(entries: list[dict[str, Any]]) -> dict[str, str]:
+    latest: dict[str, str] = {}
+    for entry in reversed(entries):
+        parts = _entry_content_parts(entry, maxsplit=3)
+        if len(parts) < 3:
+            continue
+        category = parts[1].lower()
+        status = parts[2].lower()
+        if category and category not in latest:
+            latest[category] = status
+    return latest
+
+
+def _latest_intention_state(entries: list[dict[str, Any]], *, limit: int = 5) -> list[dict[str, str]]:
+    latest: dict[str, dict[str, str]] = {}
+    for entry in reversed(entries):
+        parts = _entry_content_parts(entry, maxsplit=3)
+        if len(parts) < 3:
+            continue
+        name = parts[0].replace("INTENTION:", "").strip().lower()
+        if not name or name in latest:
+            continue
+        latest[name] = {
+            "name": name,
+            "status": parts[1].lower(),
+            "date": parts[2],
+            "note": parts[3] if len(parts) > 3 else "",
+        }
+    return list(latest.values())[:limit]
+
+
+def _flash_texts(entries: list[dict[str, Any]], *, limit: int = 5) -> list[str]:
+    snippets: list[str] = []
+    for entry in entries[-limit:]:
+        parts = _entry_content_parts(entry, maxsplit=1)
+        if len(parts) < 2:
+            continue
+        text = parts[1].strip()
+        if text:
+            snippets.append(text)
+    return snippets
+
+
+def _state_tag(entry: dict[str, Any] | None) -> str:
+    if not isinstance(entry, dict):
+        return "unknown"
+    parts = _entry_content_parts(entry, maxsplit=2)
+    if len(parts) < 2:
+        return "unknown"
+    return parts[1].lower()
+
+
+def _session_summary(check: dict[str, Any]) -> str:
+    state_entry = check.get("state")
+    if isinstance(state_entry, dict):
+        parts = _entry_content_parts(state_entry, maxsplit=2)
+        if len(parts) > 2 and parts[2]:
+            return parts[2]
+    arcs = check.get("arcs")
+    if isinstance(arcs, list):
+        for arc in arcs:
+            if isinstance(arc, dict):
+                message = str(arc.get("message") or "").strip()
+                if message:
+                    return message
+    return "mapsOS session start"
+
+
 def _collect_entries(prefix: str, *, limit: int, days: int | None = None, graph: str = "cassette") -> list[dict[str, Any]]:
     recalled, _source = recall_resilient(prefix, graph=graph, limit=limit)
     normalized = [
@@ -130,6 +202,57 @@ def check_payload(*, graph: str = "cassette") -> dict[str, Any]:
             for arc in arcs
         ],
         "survival": bool(getattr(survival, "active", False)),
+    }
+
+
+def session_start_payload(*, graph: str = "cassette") -> dict[str, Any]:
+    from .cart_bridge import (
+        bridge_health,
+        get_daily_brief,
+        get_open_tasks,
+        get_recent_sessions,
+    )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        future_check = executor.submit(check_payload, graph=graph)
+        future_body = executor.submit(_collect_entries, "BODY:", limit=21, days=7, graph=graph)
+        future_intentions = executor.submit(_collect_entries, "INTENTION:", limit=28, days=21, graph=graph)
+        future_flash = executor.submit(_collect_entries, "FLASH:", limit=10, graph=graph)
+        future_p0 = executor.submit(get_open_tasks, "P0")
+        future_p1 = executor.submit(get_open_tasks, "P1")
+        future_sessions = executor.submit(get_recent_sessions, 5)
+        future_daily_brief = executor.submit(get_daily_brief)
+        future_bridge = executor.submit(bridge_health)
+
+        check = future_check.result()
+        body_entries = future_body.result()
+        intention_entries = future_intentions.result()
+        flash_entries = future_flash.result()
+        p0_tasks = future_p0.result()
+        p1_tasks = future_p1.result()
+        recent_sessions = future_sessions.result()
+        daily_brief = future_daily_brief.result()
+        bridge = future_bridge.result()
+
+    return {
+        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "state": check.get("state"),
+        "state_tag": _state_tag(check.get("state")),
+        "summary": _session_summary(check),
+        "arcs": check.get("arcs") or [],
+        "survival": bool(check.get("survival")),
+        "body": _latest_body_state(body_entries),
+        "intentions": _latest_intention_state(intention_entries),
+        "flash": _flash_texts(flash_entries),
+        "cart": {
+            "bridge": bridge,
+            "tasks": {
+                "p0": p0_tasks,
+                "p1": p1_tasks,
+            },
+            "recent_sessions": recent_sessions,
+            "daily_brief": daily_brief,
+        },
     }
 
 
@@ -204,6 +327,11 @@ def build_app() -> "FastAPI":
     def check(authorization: str | None = Header(default=None)) -> dict[str, Any]:
         _require_token(authorization)
         return check_payload()
+
+    @app.get("/session-start")
+    def session_start(authorization: str | None = Header(default=None)) -> dict[str, Any]:
+        _require_token(authorization)
+        return session_start_payload()
 
     @app.get("/trend")
     def trend(days: int = 30, authorization: str | None = Header(default=None)) -> dict[str, Any]:
