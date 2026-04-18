@@ -93,6 +93,40 @@ def test_cart_bridge_parses_task_output_and_gracefully_handles_absence(monkeypat
     ]
 
 
+def test_cart_bridge_prefers_sessions_recent_json(monkeypatch):
+    class _Result:
+        def __init__(self, stdout: str, returncode: int = 0):
+            self.stdout = stdout
+            self.returncode = returncode
+
+    monkeypatch.setattr(cart_bridge, "cart_available", lambda: True)
+    monkeypatch.setattr(
+        cart_bridge.subprocess,
+        "run",
+        lambda *args, **kwargs: _Result(
+            '{"schema_version":"2026-04-17","surface":"sessions.recent","count":1,'
+            '"sessions":[{"id":"hermes-session-h1","title":"Hermes Session 1","agent":"hermes",'
+            '"type":"agent-log","date":"2026-04-17","summary_preview":"kept context clean",'
+            '"path":"/tmp/h1.md","source_type":"hermes"}]}'
+        ),
+    )
+
+    sessions = cart_bridge.get_recent_sessions(1)
+
+    assert sessions == [
+        {
+            "id": "hermes-session-h1",
+            "title": "Hermes Session 1",
+            "agent": "hermes",
+            "type": "agent-log",
+            "date": "2026-04-17",
+            "summary_preview": "kept context clean",
+            "path": "/tmp/h1.md",
+            "source_type": "hermes",
+        }
+    ]
+
+
 def test_should_exit_accepts_custom_low_state_set():
     assert should_exit("stable", was_in_survival=True, low_states={"depleted"}) is True
     assert should_exit("depleted", was_in_survival=True, low_states={"depleted"}) is False

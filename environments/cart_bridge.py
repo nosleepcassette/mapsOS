@@ -141,6 +141,29 @@ def get_recent_sessions(n: int = 3) -> list[dict[str, Any]]:
     """Return the most recent session and agent-log note summaries from cart."""
     if not cart_available():
         return []
+    payload = _run_cart_json(["sessions", "recent", "--json", "--limit", str(max(n, 0))], timeout=6)
+    if payload is not None:
+        raw_sessions = payload.get("sessions")
+        if isinstance(raw_sessions, list):
+            sessions: list[dict[str, Any]] = []
+            for raw in raw_sessions:
+                if not isinstance(raw, dict):
+                    continue
+                sessions.append(
+                    {
+                        "id": str(raw.get("id") or ""),
+                        "title": str(raw.get("title") or ""),
+                        "agent": str(raw.get("agent") or ""),
+                        "type": str(raw.get("type") or ""),
+                        "date": str(raw.get("date") or ""),
+                        "summary_preview": str(raw.get("summary_preview") or ""),
+                        "path": str(raw.get("path") or ""),
+                        "source_type": str(raw.get("source_type") or ""),
+                    }
+                )
+            return sessions
+
+    # Fallback for older cart versions that do not yet expose sessions.recent.
     results: list[dict[str, Any]] = []
     seen_paths: set[str] = set()
     for note_type in ("agent-log", "session"):
