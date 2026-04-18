@@ -136,9 +136,12 @@ def test_session_start_payload_includes_bridge_and_latest_state(monkeypatch):
     monkeypatch.setattr(cart_bridge, "get_recent_sessions", lambda n=5: [{"path": "/tmp/session.md", "title": "Session"}])
     monkeypatch.setattr(cart_bridge, "get_daily_brief", lambda: "brief")
     monkeypatch.setattr(cart_bridge, "bridge_health", lambda: {"available": True, "doctor": True, "tasks": True, "sessions": True, "warnings": []})
+    monkeypatch.setattr(cart_bridge, "get_doctor_payload", lambda: {"available": True, "warnings": []})
 
     payload = serve.session_start_payload()
 
+    assert payload["role"] == "intake"
+    assert payload["degraded"] is False
     assert payload["state_tag"] == "clear"
     assert payload["summary"] == "note"
     assert payload["body"] == {"sleep": "rough", "energy": "steady"}
@@ -146,17 +149,56 @@ def test_session_start_payload_includes_bridge_and_latest_state(monkeypatch):
         {"name": "water", "status": "met", "date": "2026-04-17", "note": "hydrated"}
     ]
     assert payload["flash"] == ["ship it"]
+    assert payload["sources"]["check"]["ok"] is True
+    assert payload["role_context"]["priority"] == "qualitative intake and surfaced context"
     assert payload["cart"]["tasks"]["p0"] == [{"text": "P0-task"}]
     assert payload["cart"]["recent_sessions"] == [{"path": "/tmp/session.md", "title": "Session"}]
 
 
 def test_session_start_endpoint_requires_token(monkeypatch):
     monkeypatch.setenv("MAPS_SERVE_TOKEN", "secret")
-    monkeypatch.setattr(serve, "session_start_payload", lambda graph="cassette": {"state_tag": "clear"})
+    monkeypatch.setattr(
+        serve,
+        "session_start_payload",
+        lambda graph="cassette", role="intake": {"state_tag": "clear", "role": role},
+    )
     client = TestClient(serve.build_app())
 
     assert client.get("/session-start").status_code == 401
     ok = client.get("/session-start", headers={"Authorization": "Bearer secret"})
 
     assert ok.status_code == 200
-    assert ok.json() == {"state_tag": "clear"}
+    assert ok.json() == {"state_tag": "clear", "role": "intake"}
+
+
+def test_session_start_payload_degrades_for_librarian_role(monkeypatch):
+    monkeypatch.setattr(
+        serve,
+        "check_payload",
+        lambda graph="cassette": {
+            "state": {"content": "STATE: 2026-04-16 | grounded | note", "id": 2, "ts": "2026-04-16T03:00:00Z"},
+            "arcs": [],
+            "survival": False,
+        },
+    )
+    monkeypatch.setattr(serve, "_collect_entries", lambda prefix, *, limit, days=None, graph="cassette": [])
+
+    import environments.cart_bridge as cart_bridge
+
+    monkeypatch.setattr(cart_bridge, "get_open_tasks", lambda priority=None: [])
+    monkeypatch.setattr(cart_bridge, "get_recent_sessions", lambda n=5: (_ for _ in ()).throw(RuntimeError("boom")))
+    monkeypatch.setattr(cart_bridge, "get_daily_brief", lambda: "")
+    monkeypatch.setattr(
+        cart_bridge,
+        "bridge_health",
+        lambda: {"available": True, "doctor": False, "tasks": True, "sessions": False, "warnings": ["cart session surface unavailable"]},
+    )
+    monkeypatch.setattr(cart_bridge, "get_doctor_payload", lambda: {"available": False, "warnings": ["cart doctor failed"]})
+
+    payload = serve.session_start_payload(role="librarian")
+
+    assert payload["role"] == "librarian"
+    assert payload["degraded"] is True
+    assert "cart doctor unavailable" in payload["degradation_reasons"]
+    assert "cart session surface unavailable" in payload["degradation_reasons"]
+    assert payload["role_context"]["priority"] == "recover degraded services first"

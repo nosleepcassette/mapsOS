@@ -408,14 +408,21 @@ def test_session_start_json_uses_composed_payload(monkeypatch, capsys):
     monkeypatch.setattr(
         maps_cli,
         "session_start_payload",
-        lambda graph="cassette": {"state_tag": "clear", "summary": "locked in"},
+        lambda graph="cassette", role="intake": {
+            "role": role,
+            "state_tag": "clear",
+            "summary": "locked in",
+            "degraded": False,
+            "role_context": {"priority": "qualitative intake and surfaced context"},
+        },
     )
 
-    args = SimpleNamespace(graph="cassette", json=True)
+    args = SimpleNamespace(graph="cassette", json=True, role="librarian")
     rc = maps_cli.cmd_session_start(args)
     out = capsys.readouterr().out
 
     assert rc == 0
+    assert '"role": "librarian"' in out
     assert '"state_tag": "clear"' in out
     assert '"summary": "locked in"' in out
 

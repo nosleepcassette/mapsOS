@@ -136,6 +136,7 @@ maps check                    # session start: context pull + arc check
 maps check --role             # + agent mode guidance (STATE → role, energy tier, refs to load)
 maps check --load-brief ~/atlas/daily/brief-2026-04-17.md
 maps session-start            # composed session-start packet with cart bridge context
+maps session-start --role librarian
 maps session-start --json
 maps pattern                  # full pattern weaver output
 maps review                   # cycle review (last 14 days)
@@ -210,7 +211,20 @@ maps serve uninstall
 
 The install command will reuse `MAPS_SERVE_TOKEN` from your shell if present; otherwise it generates one and saves it to `~/.mapsOS/serve/token`.
 
-The HTTP server now includes a richer `GET /session-start` endpoint in addition to the existing `GET /check`. It composes the latest state, arcs, body/intention context, Cart P0/P1 tasks, recent session notes, and bridge health into one packet for remote clients.
+The HTTP server now includes a richer `GET /session-start` endpoint in addition to the existing `GET /check`. It composes the latest state, arcs, body/intention context, Cart P0/P1 tasks, recent session notes, Cart doctor state, and bridge health into one packet for remote clients.
+
+`session-start` is now role-aware:
+
+- `intake` is the default surface and prioritizes qualitative context
+- `librarian` prioritizes bridge/cart maintenance context
+
+The payload also degrades explicitly instead of failing silently. Both CLI and HTTP surfaces include:
+
+- `role`
+- `degraded`
+- `degradation_reasons`
+- `sources`
+- `role_context`
 
 ---
 

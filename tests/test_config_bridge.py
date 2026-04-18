@@ -127,6 +127,37 @@ def test_cart_bridge_prefers_sessions_recent_json(monkeypatch):
     ]
 
 
+def test_bridge_health_reports_missing_surfaces(monkeypatch):
+    class _Result:
+        def __init__(self, stdout: str, returncode: int = 0):
+            self.stdout = stdout
+            self.returncode = returncode
+
+    responses = iter(
+        [
+            _Result('{"schema_version":"2026-04-17","surface":"doctor","available":true,"warnings":["wire doctor found 1 issue(s)"]}'),
+            _Result('{"schema_version":"2026-04-17","surface":"unexpected"}'),
+            _Result('{"schema_version":"2026-04-17","surface":"unexpected"}'),
+        ]
+    )
+
+    monkeypatch.setattr(cart_bridge, "cart_available", lambda: True)
+    monkeypatch.setattr(
+        cart_bridge.subprocess,
+        "run",
+        lambda *args, **kwargs: next(responses),
+    )
+
+    payload = cart_bridge.bridge_health()
+
+    assert payload["available"] is True
+    assert payload["doctor"] is True
+    assert payload["tasks"] is False
+    assert payload["sessions"] is False
+    assert "cart task surface unavailable" in payload["warnings"]
+    assert "cart session surface unavailable" in payload["warnings"]
+
+
 def test_should_exit_accepts_custom_low_state_set():
     assert should_exit("stable", was_in_survival=True, low_states={"depleted"}) is True
     assert should_exit("depleted", was_in_survival=True, low_states={"depleted"}) is False

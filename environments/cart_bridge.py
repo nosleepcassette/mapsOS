@@ -56,6 +56,10 @@ def _run_cart_json(command: list[str], *, timeout: int = 8) -> dict[str, Any] | 
     return payload if isinstance(payload, dict) else None
 
 
+def _surface_ok(payload: dict[str, Any] | None, surface: str) -> bool:
+    return isinstance(payload, dict) and str(payload.get("surface") or "") == surface
+
+
 def _note_summary(path: Path) -> dict[str, Any]:
     title = path.stem
     note_id = path.stem
@@ -215,12 +219,24 @@ def bridge_health() -> dict[str, Any]:
         }
 
     doctor = get_doctor_payload()
+    tasks_payload = _run_cart_json(["todo", "list", "--json"], timeout=5)
+    sessions_payload = _run_cart_json(
+        ["sessions", "recent", "--json", "--limit", "1"],
+        timeout=6,
+    )
+    tasks_ok = _surface_ok(tasks_payload, "todo.list")
+    sessions_ok = _surface_ok(sessions_payload, "sessions.recent")
+    warnings = list(doctor.get("warnings") or [])
+    if not tasks_ok:
+        warnings.append("cart task surface unavailable")
+    if not sessions_ok:
+        warnings.append("cart session surface unavailable")
     return {
         "available": True,
-        "tasks": True,
-        "sessions": True,
+        "tasks": tasks_ok,
+        "sessions": sessions_ok,
         "doctor": bool(doctor.get("available")),
-        "warnings": list(doctor.get("warnings") or []),
+        "warnings": warnings,
     }
 
 

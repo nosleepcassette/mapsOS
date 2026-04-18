@@ -1298,13 +1298,19 @@ def cmd_check(args, quiet: bool = False) -> int:
 
 
 def cmd_session_start(args) -> int:
-    payload = session_start_payload(graph=args.graph)
+    payload = session_start_payload(graph=args.graph, role=args.role)
     if getattr(args, "json", False):
         print(json.dumps(payload, default=str))
         return 0
 
+    print(f"role: {payload.get('role', 'intake')}")
     print(f"state: {payload['state_tag']}")
     print(f"summary: {payload['summary']}")
+    if payload.get("degraded"):
+        print("degraded: yes")
+        reasons = payload.get("degradation_reasons") or []
+        for reason in reasons[:4]:
+            print(f"  - {reason}")
     if payload["survival"]:
         print("survival: active")
 
@@ -1342,6 +1348,19 @@ def cmd_session_start(args) -> int:
             print(f"  P0: {len(p0)} open")
         if p1:
             print(f"  P1: {len(p1)} open")
+
+    role_context = payload.get("role_context") or {}
+    state_guidance = role_context.get("state_guidance") if isinstance(role_context, dict) else {}
+    if role_context:
+        print("role-context:")
+        priority = role_context.get("priority")
+        if priority:
+            print(f"  priority: {priority}")
+        if isinstance(state_guidance, dict):
+            if state_guidance.get("mode"):
+                print(f"  mode: {state_guidance['mode']}")
+            if state_guidance.get("energy"):
+                print(f"  energy: {state_guidance['energy']}")
     return 0
 
 
@@ -1613,6 +1632,12 @@ def build_parser() -> argparse.ArgumentParser:
     ch.add_argument("--role", action="store_true", help="output embedded mode guidance")
     ch.add_argument("--json", action="store_true", help="emit JSON payload")
     ss = sub.add_parser("session-start", help="composed session-start packet with cart bridge context")
+    ss.add_argument(
+        "--role",
+        choices=["intake", "librarian"],
+        default="intake",
+        help="session-start role surface to compose (default intake)",
+    )
     ss.add_argument("--json", action="store_true", help="emit JSON payload")
     dr = sub.add_parser("doctor", help="check serve, bridge, exports, and cart health")
     dr.add_argument("--json", action="store_true", help="emit JSON payload")
