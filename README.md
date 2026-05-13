@@ -568,3 +568,13 @@ mapsOS/
 ---
 
 *maps · cassette.help · MIT*
+
+---
+
+## support this work
+
+maps is currently navigating severe financial precarity and is at real risk of losing her housing. if this project has been useful to you — or you just think what she's building is worth keeping alive — please consider throwing a few dollars her way. it goes directly toward keeping the lights on.
+
+[ko-fi.com/nosleepcassette](https://ko-fi.com/nosleepcassette) · venmo: **@keaghoul** · cashapp: **$keaghoul** · [cassette.help](https://cassette.help)
+
+<!-- cassette.help/donate -->
