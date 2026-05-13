@@ -569,6 +569,26 @@ mapsOS/
 
 *maps · cassette.help · MIT*
 
+
+<!-- BEGIN INJECT:gofundme -->
+---
+
+## support this work
+
+maps is currently navigating severe financial precarity and is at real risk of losing her housing. if this project has been useful to you — or you just think what she's building is worth keeping alive — please consider throwing a few dollars her way.
+
+<div align="center">
+
+<a href="https://www.gofundme.com/f/support-needed-for-unexpected-expenses-brn6h">
+  <img src="https://img.shields.io/badge/GoFundMe-support%20maps-00b964?style=for-the-badge&logo=gofundme&logoColor=white" alt="GoFundMe — support maps">
+</a>
+
+**[→ gofundme.com/f/support-needed-for-unexpected-expenses-brn6h](https://www.gofundme.com/f/support-needed-for-unexpected-expenses-brn6h)**
+
+</div>
+
+[ko-fi.com/nosleepcassette](https://ko-fi.com/nosleepcassette) · venmo: **@keaghoul** · cashapp: **$keaghoul** · [cassette.help](https://cassette.help)
+<!-- END INJECT:gofundme -->
 ---
 
 ## support this work
